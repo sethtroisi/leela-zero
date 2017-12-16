@@ -24,6 +24,7 @@
 #include <QCryptographicHash>
 #include "Production.h"
 #include "Game.h"
+#include <unistd.h>
 
 constexpr int RETRY_DELAY_MIN_SEC = 30;
 constexpr int RETRY_DELAY_MAX_SEC = 60 * 60;  // 1 hour
@@ -164,8 +165,21 @@ void Production::startGames() {
             }
             m_gamesThreads[thread_index].init(myGpu, m_network, &m_movesMade);
             m_gamesThreads[thread_index].start();
+
+            usleep(100 * 1000);
         }
     }
+
+    m_start = std::chrono::high_resolution_clock::now();
+
+    while (true) {
+        sleep(2 * 60 + 1);
+        QTextStream(stdout) << "" << endl << endl;
+        m_gamesPlayed++;
+        printTimingInfo(0);
+        m_gamesPlayed--;
+    }
+
 }
 
 void Production::getResult(const QString& file, float duration) {
