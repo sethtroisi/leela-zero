@@ -22,6 +22,7 @@
 #include <QFileInfo>
 #include <QThread>
 #include <QCryptographicHash>
+#include <unistd.h>
 #include "Production.h"
 #include "Game.h"
 
@@ -165,6 +166,21 @@ void Production::startGames() {
             m_gamesThreads[thread_index].init(myGpu, m_network, &m_movesMade);
             m_gamesThreads[thread_index].start();
         }
+    }
+
+    while (true) {
+        if (m_movesMade > 0) {
+            break;
+        }
+        sleep(1);
+        m_start = std::chrono::high_resolution_clock::now();
+    }
+    while (true) {
+        sleep(2 * 60 + 1);
+
+        m_gamesPlayed++;
+        printTimingInfo(0);
+        m_gamesPlayed--;
     }
 }
 
