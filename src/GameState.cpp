@@ -22,6 +22,9 @@
 #include <sstream>
 #include <algorithm>
 #include <array>
+#include <bitset>
+#include <utility>
+#include <deque>
 
 #include "config.h"
 
@@ -37,7 +40,10 @@ void GameState::init_game(int size, float komi) {
     KoState::init_game(size, komi);
 
     game_history.clear();
-    game_history.emplace_back(std::make_shared<KoState>(*this));
+    append_to_gamehistory();
+
+    m_boardplanes.clear();
+    update_boardplanes();
 
     m_timecontrol.set_boardsize(board.get_boardsize());
     m_timecontrol.reset_clocks();
@@ -49,13 +55,16 @@ void GameState::reset_game() {
     KoState::reset_game();
 
     game_history.clear();
-    game_history.emplace_back(std::make_shared<KoState>(*this));
+    append_to_gamehistory();
+
+    m_boardplanes.clear();
+    update_boardplanes();
 
     m_timecontrol.reset_clocks();
 }
 
 bool GameState::forward_move(void) {
-    if (game_history.size() > m_movenum + 1) {
+    if (m_history_enabled && game_history.size() > m_movenum + 1) {
         m_movenum++;
         *(static_cast<KoState*>(this)) = *game_history[m_movenum];
         return true;
@@ -65,7 +74,7 @@ bool GameState::forward_move(void) {
 }
 
 bool GameState::undo_move(void) {
-    if (m_movenum > 0) {
+    if (m_history_enabled && m_movenum > 0) {
         m_movenum--;
 
         // don't actually delete it!
@@ -82,12 +91,14 @@ bool GameState::undo_move(void) {
 }
 
 void GameState::rewind(void) {
-    *(static_cast<KoState*>(this)) = *game_history[0];
-    m_movenum = 0;
+    if (m_history_enabled) {
+        *(static_cast<KoState*>(this)) = *game_history[0];
+        m_movenum = 0;
+    }
 }
 
 void GameState::play_move(int vertex) {
-    play_move(board.get_to_move(), vertex);
+    play_move(get_to_move(), vertex);
 }
 
 void GameState::play_pass() {
@@ -108,8 +119,13 @@ void GameState::play_move(int color, int vertex) {
     }
 
     // cut off any leftover moves from navigating
-    game_history.resize(m_movenum);
-    game_history.emplace_back(std::make_shared<KoState>(*this));
+    if (m_history_enabled) {
+        game_history.resize(m_movenum);
+        game_history.emplace_back(std::make_shared<KoState>(*this));
+    }
+
+    m_boardplanes.resize(m_movenum);
+    update_boardplanes();
 }
 
 bool GameState::play_textmove(std::string color, std::string vertex) {
@@ -197,7 +213,12 @@ void GameState::anchor_game_history(void) {
     // handicap moves don't count in game history
     m_movenum = 0;
     game_history.clear();
-    game_history.emplace_back(std::make_shared<KoState>(*this));
+    if (m_history_enabled) {
+        game_history.emplace_back(std::make_shared<KoState>(*this));
+    }
+
+    m_boardplanes.clear();
+    update_boardplanes();
 }
 
 bool GameState::set_fixed_handicap(int handicap) {
@@ -328,4 +349,49 @@ void GameState::place_free_handicap(int stones) {
     anchor_game_history();
 
     set_handicap(orgstones);
+}
+
+void GameState::disable_history() {
+    m_history_enabled = false;
+    game_history.clear();
+}
+
+void GameState::append_to_gamehistory() {
+    if (m_history_enabled) {
+        game_history.emplace_back(std::make_shared<KoState>(*this));
+    }
+}
+
+void GameState::update_boardplanes() {
+    if (m_boardplanes.size() == Network::INPUT_MOVES) {
+        m_boardplanes.pop_back();
+    }
+
+    InputPlane plane;
+    state_to_board_plane(plane.first, plane.second);
+    m_boardplanes.emplace_front(plane);
+}
+
+const GameState::InputPlane& GameState::get_boardplanes(int moves_ago) const {
+    assert(moves_ago < Network::INPUT_MOVES);
+    assert(moves_ago < m_boardplanes.size());
+    return m_boardplanes[moves_ago];
+}
+
+void GameState::state_to_board_plane(Network::BoardPlane& black, Network::BoardPlane& white) const {
+    auto idx = 0;
+    for (int j = 0; j < 19; j++) {
+        for(int i = 0; i < 19; i++) {
+            int vtx = board.get_vertex(i, j);
+            FastBoard::square_t color = board.get_square(vtx);
+            if (color != FastBoard::EMPTY) {
+                if (color == FastBoard::BLACK) {
+                    black[idx] = true;
+                } else {
+                    white[idx] = true;
+                }
+            }
+            idx++;
+        }
+    }
 }

@@ -32,7 +32,7 @@ class UCTNode;
 #endif
 
 #include "FastState.h"
-#include "GameState.h"
+class GameState;
 
 class Network {
 public:
@@ -48,8 +48,9 @@ public:
                                       Ensemble ensemble,
                                       int rotation = -1);
     // File format version
-    static constexpr int FORMAT_VERSION = 1;
-    static constexpr int INPUT_CHANNELS = 18;
+    static constexpr auto FORMAT_VERSION = 1;
+    static constexpr auto INPUT_MOVES = 8;
+    static constexpr auto INPUT_CHANNELS = 2 * INPUT_MOVES + 2;
 
     static void initialize();
     static void benchmark(GameState * state, int iterations = 1600);
@@ -58,6 +59,7 @@ public:
                         std::vector<float>& output,
                         float temperature = 1.0f);
     static void gather_features(GameState* state, NNPlanes & planes);
+    static void gather_features2(GameState* state, NNPlanes & planes);
 
 private:
     static Netresult get_scored_moves_internal(
