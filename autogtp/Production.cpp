@@ -49,6 +49,7 @@ void ProductionWorker::run() {
         if (!game.gameStart(min_leelaz_version)) {
             return;
         }
+        auto outstanding = 0;
         do {
             game.move();
             if (!game.waitForMove()) {
@@ -56,6 +57,8 @@ void ProductionWorker::run() {
             }
             game.readMove();
             (*m_movesMade)++;
+            (*m_movesOutstanding)++;
+            outstanding++;
         } while (game.nextMove() && m_state == RUNNING);
         switch(m_state) {
         case RUNNING:
@@ -68,6 +71,7 @@ void ProductionWorker::run() {
                 auto end = std::chrono::high_resolution_clock::now();
                 auto gameDuration =
                     std::chrono::duration_cast<std::chrono::seconds>(end - start).count();
+                (*m_movesOutstanding) -= outstanding;
                 emit resultReady(game.getFile(), gameDuration);
             }
             QTextStream(stdout) << "Stopping engine." << endl;
@@ -91,13 +95,15 @@ void ProductionWorker::run() {
 
 void ProductionWorker::init(const QString& gpuIndex,
                             const QString& net,
-                            QAtomicInt* movesMade) {
+                            QAtomicInt* movesMade,
+                            QAtomicInt* movesOutstanding) {
     m_option = " -g -t 1 -q -d -n -m 30 -w ";
     if (!gpuIndex.isEmpty()) {
         m_option.prepend(" --gpu=" + gpuIndex + " ");
     }
     m_network = net;
     m_movesMade = movesMade;
+    m_movesOutstanding = movesOutstanding;
     m_state = RUNNING;
 }
 
@@ -163,18 +169,14 @@ void Production::startGames() {
             } else {
                 myGpu = m_gpusList.at(gpu);
             }
-            m_gamesThreads[thread_index].init(myGpu, m_network, &m_movesMade);
+            m_gamesThreads[thread_index].init(myGpu, m_network, &m_movesMade, &m_movesOutstanding);
             m_gamesThreads[thread_index].start();
+            usleep(50 * 1000);
         }
     }
 
-    while (true) {
-        if (m_movesMade > 0) {
-            break;
-        }
-        sleep(1);
-        m_start = std::chrono::high_resolution_clock::now();
-    }
+    m_start = std::chrono::high_resolution_clock::now();
+
     while (true) {
         sleep(2 * 60 + 1);
 
@@ -211,7 +213,8 @@ void  Production::printTimingInfo(float duration) {
         << m_gamesPlayed << " game(s) played in "
         << total_time_min.count() << " minutes = "
         << total_time_s.count() / m_gamesPlayed << " seconds/game, "
-        << total_time_millis.count() / m_movesMade  << " ms/move"
+        << total_time_millis.count() / m_movesMade  << " ms/move, "
+        << m_movesOutstanding / (m_gpus * m_games) << " avg moves calced"
         << ", last game took " << (int) duration << " seconds." << endl;
 }
 

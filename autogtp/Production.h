@@ -38,7 +38,7 @@ public:
     ProductionWorker() = default;
     ProductionWorker(const ProductionWorker& w) : QThread(w.parent()) {}
     ~ProductionWorker() = default;
-    void init(const QString& gpuIndex, const QString& net, QAtomicInt* movesMade);
+    void init(const QString& gpuIndex, const QString& net, QAtomicInt* movesMade, QAtomicInt* movesOutstanding);
     void newNetwork(const QString& net) {
         QMutexLocker locker(&m_mutex);
         m_state = NET_CHANGE;
@@ -50,6 +50,7 @@ signals:
     void resultReady(const QString& file, float duration);
 private:
     QAtomicInt* m_movesMade;
+    QAtomicInt* m_movesOutstanding;
     QString m_network;
     QString m_option;
     QMutex m_mutex;
@@ -91,6 +92,7 @@ private:
     QStringList m_gpusList;
     int m_gamesPlayed;
     QAtomicInt m_movesMade;
+    QAtomicInt m_movesOutstanding;
     QString m_network;
     QString m_keepPath;
     QString m_debugPath;
