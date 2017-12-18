@@ -25,6 +25,7 @@
 #include <unistd.h>
 #include "Production.h"
 #include "Game.h"
+#include <unistd.h>
 
 constexpr int RETRY_DELAY_MIN_SEC = 30;
 constexpr int RETRY_DELAY_MAX_SEC = 60 * 60;  // 1 hour
@@ -180,6 +181,7 @@ void Production::startGames() {
     while (true) {
         sleep(2 * 60 + 1);
 
+        QTextStream(stdout) << "" << endl << endl;
         m_gamesPlayed++;
         printTimingInfo(0);
         m_gamesPlayed--;
@@ -214,7 +216,7 @@ void  Production::printTimingInfo(float duration) {
         << total_time_min.count() << " minutes = "
         << total_time_s.count() / m_gamesPlayed << " seconds/game, "
         << total_time_millis.count() / m_movesMade  << " ms/move, "
-        << m_movesOutstanding / (m_gpus * m_games) << " avg moves calced"
+        << (m_movesOutstanding + m_gpus * m_games - 1) / (m_gpus * m_games) << " avg moves calced"
         << ", last game took " << (int) duration << " seconds." << endl;
 }
 
