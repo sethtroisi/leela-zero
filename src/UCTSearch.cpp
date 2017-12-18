@@ -42,9 +42,10 @@
 
 using namespace Utils;
 
-UCTSearch::UCTSearch(GameState & g)
+UCTSearch::UCTSearch(const GameState & g)
     : m_rootstate(g) {
     set_playout_limit(cfg_max_playouts);
+    m_rootstate.disable_history();
 }
 
 SearchResult UCTSearch::play_simulation(GameState & currstate, UCTNode* const node) {
@@ -311,7 +312,6 @@ bool UCTSearch::playout_limit_reached() const {
 void UCTWorker::operator()() {
     do {
         auto currstate = std::make_unique<GameState>(m_rootstate);
-        currstate->disable_history();
 
         auto result = m_search->play_simulation(*currstate, m_root);
         if (result.valid()) {
@@ -365,7 +365,6 @@ int UCTSearch::think(int color, passflag_t passflag) {
     int last_update = 0;
     do {
         auto currstate = std::make_unique<GameState>(m_rootstate);
-        currstate->disable_history();
 
         auto result = play_simulation(*currstate, &m_root);
         if (result.valid()) {
@@ -425,7 +424,6 @@ void UCTSearch::ponder() {
     }
     do {
         auto currstate = std::make_unique<GameState>(m_rootstate);
-        currstate->disable_history();
 
         auto result = play_simulation(*currstate, &m_root);
         if (result.valid()) {

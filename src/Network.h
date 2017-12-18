@@ -64,7 +64,7 @@ public:
 private:
     static Netresult get_scored_moves_internal(
       GameState * state, NNPlanes & planes, int rotation);
-    static int rotate_nn_idx(const int vertex, int symmetry);
+    static int rotate_nn_idx(int x, int y, int symmetry);
 };
 
 #endif

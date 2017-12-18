@@ -498,7 +498,7 @@ Network::Netresult Network::get_scored_moves_internal(
     for (int c = 0; c < INPUT_CHANNELS; ++c) {
         for (int h = 0; h < height; ++h) {
             for (int w = 0; w < width; ++w) {
-                auto rot_idx = rotate_nn_idx(h * 19 + w, rotation);
+                auto rot_idx = rotate_nn_idx(h, w, rotation);
                 input_data.emplace_back(net_t(planes[c][rot_idx]));
             }
         }
@@ -519,12 +519,12 @@ Network::Netresult Network::get_scored_moves_internal(
     named_semaphore sem_B{open_only, name};
 
     float * my_input_data = reinterpret_cast<float *>(input_mem);
+    auto idx = 0;
     for (int c = 0; c < INPUT_CHANNELS; ++c) {
         for (int h = 0; h < height; ++h) {
             for (int w = 0; w < width; ++w) {
-                auto rot_idx = rotate_nn_idx(h * 19 + w, rotation);
-                my_input_data[(c * height + h) * width + w] =
-                    (float)planes[c][rot_idx];
+                auto rot_idx = rotate_nn_idx(h, w, rotation);
+                my_input_data[idx++] = (float)planes[c][rot_idx];
             }
         }
     }
@@ -594,22 +594,23 @@ Network::Netresult Network::get_scored_moves_internal(
     // Move scores
     std::vector<float>& outputs = softmax_data;
 #endif
+
     std::vector<scored_node> result;
-    for (size_t idx = 0; idx < outputs.size(); idx++) {
-        if (idx < 19*19) {
-            auto val = outputs[idx];
-            auto rot_idx = rotate_nn_idx(idx, rotation);
+    assert(outputs.size() == 362);
+    idx = 0;
+    for (int h = 0; h < height; ++h) {
+        for (int w = 0; w < width; ++w, ++idx) {
+            auto rot_idx = rotate_nn_idx(h, w, rotation);
             int x = rot_idx % 19;
             int y = rot_idx / 19;
             int rot_vtx = state->board.get_vertex(x, y);
             if (state->board.get_square(rot_vtx) == FastBoard::EMPTY) {
+                auto val = outputs[idx];
                 result.emplace_back(val, rot_vtx);
             }
-        } else {
-            result.emplace_back(outputs[idx], FastBoard::PASS);
         }
     }
-
+    result.emplace_back(outputs[19*19], FastBoard::PASS);
     return std::make_pair(result, winrate_sig);
 }
 
@@ -692,29 +693,25 @@ void Network::gather_features(GameState * state, NNPlanes & planes) {
 }
 
 
-int Network::rotate_nn_idx(const int vertex, int symmetry) {
-    assert(vertex >= 0 && vertex < 19*19);
+int Network::rotate_nn_idx(int y, int x, int symmetry) {
+    assert(x >= 0 && x < 19);
+    assert(y >= 0 && y < 19);
     assert(symmetry >= 0 && symmetry < 8);
-    int x = vertex % 19;
-    int y = vertex / 19;
-    int newx;
-    int newy;
 
     if (symmetry >= 4) {
         std::swap(x, y);
         symmetry -= 4;
     }
 
-    if (symmetry == 0) {
-        newx = x;
-        newy = y;
-    } else if (symmetry == 1) {
+    auto newx = x;
+    auto newy = y;
+    if (symmetry == 1) {
         newx = x;
         newy = 19 - y - 1;
     } else if (symmetry == 2) {
         newx = 19 - x - 1;
         newy = y;
-    } else {
+    } else if (symmetry == 3) {
         assert(symmetry == 3);
         newx = 19 - x - 1;
         newy = 19 - y - 1;
