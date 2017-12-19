@@ -754,6 +754,22 @@ bool GTP::execute(GameState & game, std::string xinput) {
         }
 
         return true;
+    } else if (command.find("test_supervised") == 0) {
+        std::istringstream cmdstream(command);
+        std::string tmp, sgfname;
+
+        // tmp will eat test_supervised
+        cmdstream >> tmp >> sgfname;
+
+        Training::test_supervised(sgfname);
+
+        if (!cmdstream.fail()) {
+            gtp_printf(id, "");
+        } else {
+            gtp_fail_printf(id, "syntax not understood");
+        }
+
+        return true;
     }
 
     gtp_fail_printf(id, "unknown command");

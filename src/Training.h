@@ -21,6 +21,7 @@
 
 #include "config.h"
 #include <string>
+#include <tuple>
 #include <utility>
 #include "GameState.h"
 #include "Network.h"
@@ -65,7 +66,10 @@ public:
 
     static void dump_supervised(const std::string& sgf_file,
                                 const std::string& out_filename);
+    static void test_supervised(const std::string& sgf_file);
 private:
+    using teststats_t = std::tuple<int, int, double>;
+
     // Consider only every 1/th position in a game.
     // This ensures that positions in a chunk are from disjoint games.
     static constexpr size_t SKIP_SIZE = 16;
@@ -76,6 +80,9 @@ private:
     static void dump_training(int winner_color,
                               OutputChunker& outchunker);
     static void dump_debug(OutputChunker& outchunker);
+    static void test_game(GameState& state, int who_won,
+                          const std::vector<int>& tree_moves, teststats_t& stats);
+
     static std::vector<TimeStep> m_data;
 };
 

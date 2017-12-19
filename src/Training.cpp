@@ -323,3 +323,97 @@ void Training::dump_supervised(const std::string& sgf_name,
 
     std::cout << "Dumped " << train_pos << " training positions." << std::endl;
 }
+
+void Training::test_game(GameState& state, int who_won,
+                         const std::vector<int>& tree_moves, teststats_t& stats) {
+    clear_training();
+    auto counter = size_t{0};
+    state.rewind();
+
+    do {
+        auto to_move = state.get_to_move();
+        auto move = tree_moves[counter];
+        auto this_move = size_t{0};
+
+        // Detect if this SGF seems to be corrupted
+        auto moves = state.generate_moves(to_move);
+        auto moveseen = false;
+        for(const auto& gen_move : moves) {
+            if (gen_move == move) {
+                if (move != FastBoard::PASS) {
+                    // get x y coords for actual move
+                    auto xy = state.board.get_xy(move);
+                    this_move = (xy.second * 19) + xy.first;
+                } else {
+                    this_move = (19 * 19); // PASS
+                }
+                moveseen = true;
+                break;
+            }
+        }
+
+        if (!moveseen) {
+            std::cout << "Mainline move not found: " << move << std::endl;
+            return;
+        }
+
+        auto skip = Random::get_Rng().randfix<SKIP_SIZE>();
+        if (skip == 0) {
+            auto search = UCTSearch(state);
+
+            search.think(game.get_to_move());
+
+            std::get<0>(stats)++; // positions
+        }
+        counter++;
+    } while (state.forward_move() && counter < tree_moves.size());
+}
+
+void Training::test_supervised(const std::string& sgf_name) {
+    auto games = SGFParser::chop_all(sgf_name);
+    auto gametotal = games.size();
+    auto stats = teststats_t{};
+
+    std::cout << "Total games in file: " << gametotal << std::endl;
+
+    // Loop over the database multiple times. We will select different
+    // positions from each game on every pass.
+    for (auto gamecount = size_t{0}; gamecount < gametotal; gamecount++) {
+        auto sgftree = SGFTree();
+        try {
+            sgftree.load_from_string(games[gamecount]);
+        } catch (...) {
+            continue;
+        };
+
+        if (gamecount % (1000) == 0) {
+            Utils::myprintf("Game %d, test %d,\t%d/%d predicted, mean pick percent %2.2f\n",
+                gamecount, std::get<0>(stats),
+                std::get<1>(stats), std::get<0>(stats),
+                std::get<2>(stats));
+        }
+
+        auto tree_moves = sgftree.get_mainline();
+        // Empty game or couldn't be parsed?
+        if (tree_moves.size() == 0) {
+            continue;
+        }
+
+        auto who_won = sgftree.get_winner();
+        // Accept all komis and handicaps, but reject no usable result
+        if (who_won != FastBoard::BLACK && who_won != FastBoard::WHITE) {
+            continue;
+        }
+
+        auto state = GameState(sgftree.follow_mainline_state());
+        // Our board size is hardcoded in several places
+        if (state.board.get_boardsize() != 19) {
+            continue;
+        }
+
+        test_game(state, who_won, tree_moves, stats);
+    }
+
+    std::cout << "Tested ... TODO" << std::endl;
+}
+
