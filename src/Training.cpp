@@ -324,7 +324,7 @@ void Training::dump_supervised(const std::string& sgf_name,
 }
 
 void Training::test_game(GameState& state, const std::vector<int>& tree_moves,
-                         teststats_t& stats) {
+                         Random& random, teststats_t& stats) {
     clear_training();
     auto counter = size_t{0};
     state.rewind();
@@ -339,9 +339,7 @@ void Training::test_game(GameState& state, const std::vector<int>& tree_moves,
             return;
         }
 
-
-        auto skip = Random::get_Rng().randfix<SKIP_SIZE>();
-        if (skip == 0) {
+        if (random.randfix<TEST_SKIP_SIZE>() == 0) {
             UCTSearch search(state);
             UCTNode* root_node;
             search.think(to_move, 0, &root_node);
@@ -377,15 +375,15 @@ void Training::test_game(GameState& state, const std::vector<int>& tree_moves,
 }
 
 void Training::test_supervised(const std::string& sgf_name) {
+    // Seed our random so that each games moves are choosen consistently
+    // even if number of playouts is changed.
+    auto random = Random(cfg_rng_seed);
+
     auto games = SGFParser::chop_all(sgf_name);
-    auto gametotal = games.size();
+    std::cout << "Total games in file: " << games.size() << std::endl;
+
     auto stats = teststats_t{};
-
-    std::cout << "Total games in file: " << gametotal << std::endl;
-
-    // Loop over the database multiple times. We will select different
-    // positions from each game on every pass.
-    for (auto gamecount = size_t{0}; gamecount < gametotal; gamecount++) {
+    for (auto gamecount = size_t{0}; gamecount < games.size(); gamecount++) {
         auto sgftree = SGFTree();
         try {
             sgftree.load_from_string(games[gamecount]);
@@ -418,7 +416,7 @@ void Training::test_supervised(const std::string& sgf_name) {
             continue;
         }
 
-        test_game(state, tree_moves, stats);
+        test_game(state, tree_moves, random, stats);
     }
 
     std::cout << "Tested ... TODO" << std::endl;

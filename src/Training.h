@@ -25,6 +25,7 @@
 #include <utility>
 #include "GameState.h"
 #include "Network.h"
+#include "Random.h"
 #include "UCTNode.h"
 
 class TimeStep {
@@ -74,6 +75,9 @@ private:
     // This ensures that positions in a chunk are from disjoint games.
     static constexpr size_t SKIP_SIZE = 16;
 
+    // Consier only every 1/th position in a game when testing.
+    static constexpr size_t TEST_SKIP_SIZE = 64;
+
     static void process_game(GameState& state, size_t& train_pos, int who_won,
                              const std::vector<int>& tree_moves,
                              OutputChunker& outchunker);
@@ -81,7 +85,7 @@ private:
                               OutputChunker& outchunker);
     static void dump_debug(OutputChunker& outchunker);
     static void test_game(GameState& state, const std::vector<int>& tree_moves,
-                          teststats_t& stats);
+                          Random& random, teststats_t& stats);
 
     static std::vector<TimeStep> m_data;
 };
