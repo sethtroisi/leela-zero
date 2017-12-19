@@ -322,7 +322,7 @@ void UCTSearch::increment_playouts() {
     m_playouts++;
 }
 
-int UCTSearch::think(int color, passflag_t passflag) {
+int UCTSearch::think(int color, passflag_t passflag, UCTNode **node_root) {
     assert(m_playouts == 0);
     assert(m_nodes == 0);
 
@@ -407,6 +407,7 @@ int UCTSearch::think(int color, passflag_t passflag) {
                  (m_playouts * 100) / (centiseconds_elapsed+1));
     }
     int bestmove = get_best_move(passflag);
+    *node_root = &m_root;
     return bestmove;
 }
 

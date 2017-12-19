@@ -22,12 +22,14 @@
 #include <fstream>
 #include <algorithm>
 #include <boost/utility.hpp>
+#include <stdio.h>
 #include "stdlib.h"
 #include "zlib.h"
 #include "string.h"
 
 #include "Training.h"
 #include "UCTNode.h"
+#include "UCTSearch.h"
 #include "SGFParser.h"
 #include "SGFTree.h"
 #include "Timing.h"
@@ -321,46 +323,54 @@ void Training::dump_supervised(const std::string& sgf_name,
     std::cout << "Dumped " << train_pos << " training positions." << std::endl;
 }
 
-void Training::test_game(GameState& state, int who_won,
-                         const std::vector<int>& tree_moves, teststats_t& stats) {
+void Training::test_game(GameState& state, const std::vector<int>& tree_moves,
+                         teststats_t& stats) {
     clear_training();
     auto counter = size_t{0};
     state.rewind();
 
     do {
         auto to_move = state.get_to_move();
-        auto move = tree_moves[counter];
-        auto this_move = size_t{0};
+        auto move_vertex = tree_moves[counter];
 
         // Detect if this SGF seems to be corrupted
-        auto moves = state.generate_moves(to_move);
-        auto moveseen = false;
-        for(const auto& gen_move : moves) {
-            if (gen_move == move) {
-                if (move != FastBoard::PASS) {
-                    // get x y coords for actual move
-                    auto xy = state.board.get_xy(move);
-                    this_move = (xy.second * 19) + xy.first;
-                } else {
-                    this_move = (19 * 19); // PASS
-                }
-                moveseen = true;
-                break;
-            }
-        }
-
-        if (!moveseen) {
-            std::cout << "Mainline move not found: " << move << std::endl;
+        if (!state.is_move_legal(to_move, move_vertex)) {
+            std::cout << "Mainline move not found: " << move_vertex << std::endl;
             return;
         }
 
+
         auto skip = Random::get_Rng().randfix<SKIP_SIZE>();
         if (skip == 0) {
-            auto search = UCTSearch(state);
+            UCTSearch search(state);
+            UCTNode* root_node;
+            search.think(to_move, 0, &root_node);
 
-            search.think(game.get_to_move());
+            root_node->sort_root_children(to_move);
+            UCTNode * node = root_node->get_first_child();
+            if (node->first_visit()) {
+                std::cout << "No visits???" << std::endl;
+                return;
+            }
 
             std::get<0>(stats)++; // positions
+            if (move_vertex == node->get_move()) {
+                std::get<1>(stats)++; // MCTS find supervised move
+            }
+
+            int total_visits = 0;
+            int move_visits = 0;
+            while (node != nullptr && node->get_visits()) {
+                if (move_vertex == node->get_move()) {
+                    move_visits = node->get_visits();
+                }
+                total_visits += node->get_visits();
+
+                node = node->get_sibling();
+            }
+
+            // sum of percent of playouts in supervised move 
+            std::get<2>(stats) += static_cast<double>(move_visits)/total_visits;
         }
         counter++;
     } while (state.forward_move() && counter < tree_moves.size());
@@ -383,11 +393,11 @@ void Training::test_supervised(const std::string& sgf_name) {
             continue;
         };
 
-        if (gamecount % (1000) == 0) {
-            Utils::myprintf("Game %d, test %d,\t%d/%d predicted, mean pick percent %2.2f\n",
+        if (std::get<0>(stats) && gamecount % 2 == 0) {
+            printf("Game %6lu, test %lu,\t%lu/%lu predicted, mean pick percent %2.2f\n",
                 gamecount, std::get<0>(stats),
                 std::get<1>(stats), std::get<0>(stats),
-                std::get<2>(stats));
+                100*std::get<2>(stats)/std::get<0>(stats));
         }
 
         auto tree_moves = sgftree.get_mainline();
@@ -408,7 +418,7 @@ void Training::test_supervised(const std::string& sgf_name) {
             continue;
         }
 
-        test_game(state, who_won, tree_moves, stats);
+        test_game(state, tree_moves, stats);
     }
 
     std::cout << "Tested ... TODO" << std::endl;
