@@ -1,5 +1,8 @@
 # Command on Seth's machine from this directory is
 # ./pro_game_analysis.sh -a -g 100 -w ../../weights.txt ../../../training/games/ ../../autogtp/
+#
+# kgs archive can be downloaded here: https://u-go.net/gamerecords/
+# still looking for a link to gokifu archives (all in one place)
 
 function print_help {
     echo "
@@ -73,11 +76,12 @@ cat "$GAMES_TO_TEST" | xargs cat > "$SGF_TO_TEST"
 if [ ! -z "$ANALYSIS" ]; then
     testNetwork() {
         net=$1
-        file_date=`stat -c "%y" "$net"`
+        epoch_time=`stat -c "%Y" "$net"`
+        file_date=`stat -c "%y" "$net" | cut -d. -f1`
         net_name=`basename "$net"`
         results=`echo "test_supervised $SGF_TO_TEST" | "$TMP_DIR/leelaz" -q -s 123 -w $net | tail -n4 | head -n1 |
             sed 's#[^,]*[/ ]\([a-f0-9.%]*\)\(,\|$\)#\1, #g'`
-        echo "$file_date, $net_name, $results"
+        echo "$epoch_time, $file_date, $net_name, $results"
     }
 
 
