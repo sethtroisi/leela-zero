@@ -29,7 +29,6 @@
 
 #include "Training.h"
 #include "UCTNode.h"
-#include "UCTSearch.h"
 #include "SGFParser.h"
 #include "SGFTree.h"
 #include "Timing.h"
@@ -38,6 +37,7 @@
 #include "GTP.h"
 
 std::vector<TimeStep> Training::m_data{};
+Random Training::m_random{0};
 
 std::string OutputChunker::gen_chunk_name(void) const {
     auto base = std::string{m_basename};
@@ -244,7 +244,7 @@ void Training::process_game(GameState& state, size_t& train_pos, int who_won,
 
 
         // Pick every 1/SKIP_SIZE th position.
-        auto skip = Random::get_Rng().randfix<SKIP_SIZE>();
+        auto skip = m_random.randfix<SKIP_SIZE>();
         if (skip == 0) {
             auto step = TimeStep{};
             step.to_move = to_move;
@@ -266,6 +266,7 @@ void Training::process_game(GameState& state, size_t& train_pos, int who_won,
 
 void Training::dump_supervised(const std::string& sgf_name,
                                const std::string& out_filename) {
+    m_random = Random::get_Rng();
     auto outchunker = OutputChunker{out_filename, true};
     auto games = SGFParser::chop_all(sgf_name);
     auto gametotal = games.size();
@@ -274,7 +275,7 @@ void Training::dump_supervised(const std::string& sgf_name,
     std::cout << "Total games in file: " << gametotal << std::endl;
     // Shuffle games around
     std::cout << "Shuffling...";
-    std::shuffle(begin(games), end(games), Random::get_Rng());
+    std::shuffle(begin(games), end(games), m_random);
     std::cout << "done." << std::endl;
 
     Time start;
@@ -323,8 +324,9 @@ void Training::dump_supervised(const std::string& sgf_name,
     std::cout << "Dumped " << train_pos << " training positions." << std::endl;
 }
 
-void Training::test_game(GameState& state, const std::vector<int>& tree_moves,
-                         Random& random, teststats_t& stats) {
+void Training::test_game(GameState& state, int who_won,
+                         const std::vector<int>& tree_moves,
+                         teststats_t& stats) {
     clear_training();
     auto counter = size_t{0};
     state.rewind();
@@ -339,36 +341,41 @@ void Training::test_game(GameState& state, const std::vector<int>& tree_moves,
             return;
         }
 
-        if (random.randfix<TEST_SKIP_SIZE>() == 0) {
-            UCTSearch search(state);
-            UCTNode* root_node;
-            search.think(to_move, 0, &root_node);
-
-            root_node->sort_root_children(to_move);
-            UCTNode * node = root_node->get_first_child();
-            if (node->first_visit()) {
-                std::cout << "No visits???" << std::endl;
-                return;
+        auto skip = m_random.randfix<TEST_SKIP_SIZE>();
+        if (skip == 0) {
+            UCTNode root_node{FastBoard::PASS, 0.0f, 0.5f};
+            float eval;
+            std::atomic<int> node_count{0};
+            auto success = root_node.create_children(node_count, state, eval);
+            if (!success) {
+                std::cout << "Failed to create_children" << std::endl;
             }
+
+            root_node.sort_root_children(to_move);
+            auto* node = root_node.get_first_child();
 
             std::get<0>(stats)++; // positions
             if (move_vertex == node->get_move()) {
                 std::get<1>(stats)++; // MCTS find supervised move
             }
 
-            int total_visits = 0;
-            int move_visits = 0;
-            while (node != nullptr && node->get_visits()) {
-                if (move_vertex == node->get_move()) {
-                    move_visits = node->get_visits();
-                }
-                total_visits += node->get_visits();
+            // TODO record in top 3, top 5, top X
 
+            bool found = false;
+            while (node != nullptr) {
+                if (move_vertex == node->get_move()) {
+                    // TODO log loss?
+                    // sum of eval (from winners perspective)
+                    std::get<2>(stats) += node->get_eval(who_won);
+                    found = true;
+                    break;
+                }
                 node = node->get_sibling();
             }
 
-            // sum of percent of playouts in supervised move 
-            std::get<2>(stats) += static_cast<double>(move_visits)/total_visits;
+            if (!found) {
+                std::cout << "Failed to find move " << move_vertex << " in " << node_count << " children" << std::endl;
+            }
         }
         counter++;
     } while (state.forward_move() && counter < tree_moves.size());
@@ -377,7 +384,7 @@ void Training::test_game(GameState& state, const std::vector<int>& tree_moves,
 void Training::test_supervised(const std::string& sgf_name) {
     // Seed our random so that each games moves are choosen consistently
     // even if number of playouts is changed.
-    auto random = Random(cfg_rng_seed);
+    m_random = Random(cfg_rng_seed);
 
     auto games = SGFParser::chop_all(sgf_name);
     std::cout << "Total games in file: " << games.size() << std::endl;
@@ -392,7 +399,7 @@ void Training::test_supervised(const std::string& sgf_name) {
         };
 
         if (std::get<0>(stats) && gamecount % 2 == 0) {
-            printf("Game %6lu, test %lu,\t%lu/%lu predicted, mean pick percent %2.2f\n",
+            printf("Game %6lu, test %lu,\t%lu/%lu predicted, average winner eval %2.2f\n",
                 gamecount, std::get<0>(stats),
                 std::get<1>(stats), std::get<0>(stats),
                 100*std::get<2>(stats)/std::get<0>(stats));
@@ -416,7 +423,7 @@ void Training::test_supervised(const std::string& sgf_name) {
             continue;
         }
 
-        test_game(state, tree_moves, random, stats);
+        test_game(state, who_won, tree_moves, stats);
     }
 
     std::cout << "Tested ... TODO" << std::endl;

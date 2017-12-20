@@ -84,10 +84,12 @@ private:
     static void dump_training(int winner_color,
                               OutputChunker& outchunker);
     static void dump_debug(OutputChunker& outchunker);
-    static void test_game(GameState& state, const std::vector<int>& tree_moves,
-                          Random& random, teststats_t& stats);
+    static void test_game(GameState& state, int who_won,
+                          const std::vector<int>& tree_moves,
+                          teststats_t& stats);
 
     static std::vector<TimeStep> m_data;
+    static Random m_random;
 };
 
 #endif

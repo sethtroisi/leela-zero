@@ -69,7 +69,7 @@ public:
     static constexpr auto MAX_TREE_SIZE = 40'000'000;
 
     UCTSearch(GameState & g);
-    int think(int color, passflag_t passflag = NORMAL, UCTNode ** node = nullptr);
+    int think(int color, passflag_t passflag = NORMAL);
     void set_playout_limit(int playouts);
     void set_analyzing(bool flag);
     void set_quiet(bool flag);
