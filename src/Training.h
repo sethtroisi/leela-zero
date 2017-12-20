@@ -23,6 +23,7 @@
 #include <string>
 #include <tuple>
 #include <utility>
+#include <vector>
 #include "GameState.h"
 #include "Network.h"
 #include "Random.h"
@@ -69,7 +70,7 @@ public:
                                 const std::string& out_filename);
     static void test_supervised(const std::string& sgf_file);
 private:
-    using teststats_t = std::tuple<size_t, size_t, double>;
+    using teststats_t = std::tuple<size_t, size_t, std::vector<double>>;
 
     // Consider only every 1/th position in a game.
     // This ensures that positions in a chunk are from disjoint games.
@@ -87,6 +88,7 @@ private:
     static void test_game(GameState& state, int who_won,
                           const std::vector<int>& tree_moves,
                           teststats_t& stats);
+    static void print_test_status(size_t gamecount, const teststats_t& stats);
 
     static std::vector<TimeStep> m_data;
     static Random m_random;

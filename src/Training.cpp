@@ -285,7 +285,7 @@ void Training::dump_supervised(const std::string& sgf_name,
 
             if (gamecount > 0 && gamecount % 1000 == 0) {
                 Time elapsed;
-                auto elapsed_s = Time::timediff(start, elapsed) / 100.0;
+                auto elapsed_s = Time::timediff_seconds(start, elapsed);
                 Utils::myprintf("Game %5d, %5d positions in %5.2f seconds -> %d pos/s\n",
                     gamecount, train_pos, elapsed_s, (int)(train_pos / elapsed_s));
             }
@@ -349,29 +349,46 @@ void Training::test_game(GameState& state, int who_won,
 
             std::get<0>(stats)++; // positions
             if (move_vertex == node->get_move()) {
-                std::get<1>(stats)++; // MCTS find supervised move
+                std::get<1>(stats)++; // best move was on top
             }
 
             // TODO record in top 3, top 5, top X
 
             bool found = false;
-            while (node != nullptr) {
+            for (const auto& node : root_node.get_children()) {
                 if (move_vertex == node->get_move()) {
-                    // TODO log loss?
-                    // sum of eval (from winners perspective)
-                    std::get<2>(stats) += node->get_eval(who_won);
+                    std::get<2>(stats).push_back(node->get_eval(who_won));
                     found = true;
                     break;
                 }
-                node = node->get_sibling();
             }
 
             if (!found) {
                 std::cout << "Failed to find move " << move_vertex << " in " << node_count << " children" << std::endl;
+                std::get<2>(stats).push_back(0);
             }
         }
         counter++;
     } while (state.forward_move() && counter < tree_moves.size());
+}
+
+void Training::print_test_status(size_t gamecount, const teststats_t& stats) {
+    // TODO consider also adding log loss.
+    auto mse = double{0};
+    for (auto win_prob : std::get<2>(stats)) {
+        // Mirror the interval -1, +1 used in AlphaGo paper.
+        auto eval = 2 * win_prob - 1;
+        mse += (1 - eval) * (1 - eval);
+    }
+    mse /= std::get<2>(stats).size();
+
+    auto positions = std::get<0>(stats);
+    auto correct = std::get<1>(stats);
+    //auto sum_win = std::get<2>(stats);
+    printf("Game %6lu, tested positions %lu, predicted %lu/%lu = %.1f%%, MSE result: %.3f\n",
+           gamecount, positions, correct, positions,
+           100.0 * correct/positions,
+           mse);
 }
 
 void Training::test_supervised(const std::string& sgf_name) {
@@ -391,11 +408,8 @@ void Training::test_supervised(const std::string& sgf_name) {
             continue;
         };
 
-        if (std::get<0>(stats) && gamecount % 2 == 0) {
-            printf("Game %6lu, test %lu,\t%lu/%lu predicted, average winner eval %2.2f\n",
-                gamecount, std::get<0>(stats),
-                std::get<1>(stats), std::get<0>(stats),
-                100*std::get<2>(stats)/std::get<0>(stats));
+        if (std::get<0>(stats) && gamecount % 500 == 0) {
+            print_test_status(gamecount, stats);
         }
 
         auto tree_moves = sgftree.get_mainline();
@@ -418,7 +432,6 @@ void Training::test_supervised(const std::string& sgf_name) {
 
         test_game(state, who_won, tree_moves, stats);
     }
-
-    std::cout << "Tested ... TODO" << std::endl;
+    print_test_status(games.size(), stats);
 }
 
