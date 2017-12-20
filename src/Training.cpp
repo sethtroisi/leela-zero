@@ -375,9 +375,11 @@ void Training::test_game(GameState& state, int who_won,
 void Training::print_test_status(size_t gamecount, const teststats_t& stats) {
     // TODO consider also adding log loss.
     auto mse = double{0};
-    for (auto win_prob : std::get<2>(stats)) {
-        // Mirror the interval -1, +1 used in AlphaGo paper.
-        auto eval = 2 * win_prob - 1;
+    for (auto eval : std::get<2>(stats)) {
+        // "The MSE is between the actual outcome Z in {-1, 1} and the network value scaled by a factor of 1/4 to the range of 0-1."
+        // I'm interpretting that as both ranges were unified to 0-1 (0 black win?, 1 white win?)
+
+        // eval is taken from the game winner's perspective
         mse += (1 - eval) * (1 - eval);
     }
     mse /= std::get<2>(stats).size();

@@ -55,7 +55,7 @@ fi
 # Build
 if [ ! -z "$BUILD" ]; then
     mkdir -p "$TMP_DIR"
-    cd pro_game_build
+    cd "$TMP_DIR"
     cmake ..
     make
     cd -
