@@ -25,7 +25,7 @@ def find_networks():
     with open("tmp_url", "r") as f:
         html = f.read()
         # TODO grab date
-        rows = re.finditer(r"href=\"([^\"]*\.gz)\".*<td>(2017-[^<]*)</td>", html, re.I)
+        rows = re.finditer(r"href=\"([^\"]*)\.gz\".*<td>(2017-[^<]*)</td>", html, re.I)
         for row in rows:
             all_networks[row.group(1)] = {"date": row.group(2)}
 
@@ -77,7 +77,7 @@ def download_networks(args, info):
             name = network.replace(".gz", "")
             file_path = os.path.join(args.network_dir, name)
             if not os.path.exists(file_path):
-                url = NETWORKS_URL + network
+                url = NETWORKS_URL + network + ".gz"
                 gzip_path = file_path + ".gz"
                 print("Downloading \"{}\" to \"{}\"".format(network, gzip_path))
                 urllib.request.urlretrieve(url, gzip_path)
