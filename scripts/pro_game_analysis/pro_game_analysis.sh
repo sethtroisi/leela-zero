@@ -79,7 +79,7 @@ fi
 echo "collecting $GAMES games from $GAME_DIR for testing"
 GAMES_TO_TEST=$TMP_DIR/game_list.txt
 SGF_TO_TEST=$TMP_DIR/games.sgf
-find "$GAME_DIR" -iname "*.sgf" | sort -R | head -n$GAMES > "$GAMES_TO_TEST"
+find "$GAME_DIR" -name "*.sgf" | sort -R | head -n$GAMES > "$GAMES_TO_TEST"
 echo "collected `wc -l < "$GAMES_TO_TEST"` games into $GAMES_TO_TEST"
 cat "$GAMES_TO_TEST" | xargs cat > "$SGF_TO_TEST"
 

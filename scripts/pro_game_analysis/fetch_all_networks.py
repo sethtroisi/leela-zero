@@ -15,17 +15,15 @@ NETWORKS_JSON_URL="http://zero-test.sjeng.org/data/elograph.json"
 
 
 def find_networks():
-    #with urllib.request.urlopen(NETWORKS_URL) as response:
-    #    html = response.read()
-    #    f = open("tmp_url", "wb")
+    all_networks = {}
+    with urllib.request.urlopen(NETWORKS_URL) as response:
+        html = response.read().decode("utf-8")
+    #    f = open("tmp_url", "w")
     #    f.write(html)
     #    f.close()
-    all_networks = {}
-
-    with open("tmp_url", "r") as f:
-        html = f.read()
-        # TODO grab date
-        rows = re.finditer(r"href=\"([^\"]*)\.gz\".*<td>(2017-[^<]*)</td>", html, re.I)
+    #with open("tmp_url", "r") as f:
+    #    html = f.read()
+        rows = re.finditer(r"href=\"([^\"]*)\.gz\".*<td>(201[78]-[^<]*)</td>", html, re.I)
         for row in rows:
             all_networks[row.group(1)] = {"date": row.group(2)}
 
@@ -36,16 +34,14 @@ def find_networks():
 
 
 def find_network_info(networks):
-    #with urllib.request.urlopen(NETWORKS_JSON_URL) as response:
-    #    html = response.read()
-    #    f = open("tmp_url2", "wb")
+    merged_info = {}
+    with urllib.request.urlopen(NETWORKS_JSON_URL) as response:
+        html = response.read().decode("utf-8")
+    #    f = open("tmp_url2", "w")
     #    f.write(html)
     #    f.close()
-
-    merged_info = {}
-
-    with open("tmp_url2", "r") as f:
-        html = f.read()
+    #with open("tmp_url2", "r") as f:
+    #    html = f.read()
         raw = json.loads(html)
 
         for row in raw:
