@@ -70,6 +70,7 @@ def loadWeight(text):
     weights = [ [float(t) for t in l.split(" ")] for l in w[1:] ]
     return (weights, residual_blocks, count)
 
+
 print("\nLoading latest network")
 nethash = getLatestNNHash()
 print("Hash: " + nethash)
@@ -82,7 +83,6 @@ print(" %d channels and %d blocks" % (numFilters, numBlocks) )
 
 import threading
 netlock = threading.Lock()
-newNetWeight = None
 
 def LZN(ws, nb, nf):
     # ws: weights
@@ -210,10 +210,18 @@ net = LZN(weights, numBlocks, numFilters)
 print("Done!")
 
 
+def updateNN(weights, numBlocks, numFilters):
+    nn.net = None
+    gc.collect()  # hope that GPU memory is freed, not sure :-()
+    print(" %d channels and %d blocks" % (numFilters, numBlocks) )
+    nn.net = nn.LZN(weights, numBlocks, numFilters)
+    print("...updated weight!")
+
+
 import time
 class MyWeightUpdater(threading.Thread):
     def run(self):
-        global nethash, net, netlock, newNetWeight
+        global nethash, net, netlock
         print("\nStarting a thread for auto updating latest weights\n")
         while True:
             try:
@@ -223,8 +231,9 @@ class MyWeightUpdater(threading.Thread):
                     print("New net arrived")
                     nethash = newhash
                     weights, numBlocks, numFilters = loadWeight(txt)
+
                     netlock.acquire(True)  # BLOCK HERE
-                    newNetWeight = (weights, numBlocks, numFilters)
+                    updateNN(weights, numBlocks, numFilters)
                     netlock.release()
             except Exception as ex:
                 print("Error", ex)

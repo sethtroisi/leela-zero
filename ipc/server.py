@@ -45,19 +45,6 @@ def createCounters(name, num_instances):
     return smp_counter, smpA, smpB
 
 
-def checkNewNet(nn):
-    if not nn.newNetWeight:
-        return False
-    nn.net = None
-    gc.collect()  # hope that GPU memory is freed, not sure :-()
-    weights, numBlocks, numFilters = nn.newNetWeight
-    print(" %d channels and %d blocks" % (numFilters, numBlocks) )
-    nn.net = nn.LZN(weights, numBlocks, numFilters)
-    print("...updated weight!")
-    nn.newNetWeight = None
-    return True
-
-
 def getReadyInstanceData(smpB, shared_input, batch_size):
     instance_ids = []
     input_data = []
@@ -135,23 +122,19 @@ def main():
 
     print("Waiting for %d autogtp instances to run" % num_instances)
 
-    net = nn.net
-
     # t2 = time.perf_counter()
     while True:
-        nn.netlock.acquire(True)   # BLOCK HERE
-        if checkNewNet(nn):
-            net = nn.net
-        nn.netlock.release()
-
         instance_ids, dt = getReadyInstanceData(smpB, inp, batch_size)
-        net[0].set_value(dt.reshape( (batch_size, INPUT_CHANNELS, BOARD_SIZE, BOARD_SIZE) ) )
 
         # t1 = time.perf_counter()
         # print("delta t1 = ", t1 - t2)
         # t1 = time.perf_counter()
 
-        qqq = net[1]().astype(np.float32)
+        nn.netlock.acquire(True)   # BLOCK HERE
+        nn.net[0].set_value(dt.reshape( (batch_size, INPUT_CHANNELS, BOARD_SIZE, BOARD_SIZE) ) )
+
+        qqq = nn.net[1]().astype(np.float32)
+        nn.netlock.release()       # RELEASE HERE
         sss = qqq.view(dtype = np.uint8)
 
         for i, instance_id in enumerate(instance_ids):
