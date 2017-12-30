@@ -73,7 +73,7 @@ def main():
 
     #### MEMORY SETUP ####
     # num_instance * (two semaphores, input, and output)
-    counter_size = 2 + num_instances
+    counter_size = 4
     total_input_size  = num_instances * INSTANCE_INPUT_SIZE
     total_output_size = num_instances * INSTANCE_OUTPUT_SIZE
 
@@ -86,11 +86,7 @@ def main():
         sm = ipc.SharedMemory(name, flags=ipc.O_CREAT, size=shared_memory_size )
 
     # memory layout of the shared memory:
-    # | counter counter | input 1 | input 2 | .... |  output 1 | output 2| ..... |
-
-    # TODO are these in shared memory? how?
-    smp_counter, smpA, smpB = createCounters(leename, num_instances)
-
+    # | counter counter | id id | input 1 | input 2 | .... |  output 1 | output 2| ..... |
     mem = mmap.mmap(sm.fd, sm.size)
     sm.close_fd()
 
@@ -100,6 +96,7 @@ def main():
     inp     = mv[counter_size:counter_size + total_input_size]
     memout =  mv[counter_size + total_input_size:]
 
+    smp_counter, smpA, smpB = createCounters(leename, num_instances)
 
     #### NN SETUP ####
     import nn # import our neural network
@@ -109,6 +106,8 @@ def main():
 
     # num_instances = counter0 * 256 + counter1
     counter[0:2] = divmod(num_instances, 256)
+    # first unclaimed id
+    counter[2:4] = (0, 0)
 
     smp_counter.release() # now clients can take this semaphore
 

@@ -152,22 +152,18 @@ void Network::initialize(void) {
     sprintf(name, "/%s_counter", pname);
     named_semaphore sem_counter{open_only, name};
     sem_counter.wait();
-    int i = 0;
-    // find a empty slot
-    while (1) {
-        if (mem[2+i] == 0) {
-            myid = i;
-            mem[2+i] = 1;
-            break;
-        }
-        i = i + 1;
-    }
+
+    // grab id and increment
+    myid = 256 * mem[2+1] + mem[2+2];
+    mem[2+1] = (myid + 1) / 256;
+    mem[2+2] = (myid + 1) % 256;
+
     sem_counter.post();
 
     myprintf("My ID is %d\n", myid);
 
-    input_mem =  mem + 2 + batch_size + myid * 4*18*19*19;
-    output_mem = mem + 2 + batch_size + 4*batch_size*18*19*19 + myid * 4*(19*19+2);
+    input_mem =  mem + 4 + myid * 4*18*19*19;
+    output_mem = mem + 4 + 4*batch_size*18*19*19 + myid * 4*(19*19+2);
 
     // char name[100];
 
