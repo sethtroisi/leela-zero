@@ -13,10 +13,12 @@ BOARD_SQUARES = BOARD_SIZE ** 2
 INPUT_CHANNELS = 18
 SIZE_OF_FLOAT = 4
 
-INPUT_SIZE   = SIZE_OF_FLOAT * INPUT_CHANNELS * BOARD_SQUARES
 # prob of each move + prob of pass + eval of board position
 OUTPUT_PREDICTIONS = BOARD_SQUARES + 2
-OUTPUT_SIZE  = SIZE_OF_FLOAT * OUTPUT_PREDICTIONS
+
+INSTANCE_INPUT_SIZE   = SIZE_OF_FLOAT * INPUT_CHANNELS * BOARD_SQUARES
+INSTANCE_OUTPUT_SIZE  = SIZE_OF_FLOAT * OUTPUT_PREDICTIONS
+
 
 def roundup(size, page_size):
     return size + size * (size % page_size > 0)
@@ -66,24 +68,25 @@ def main():
         print("Error: number of instances isn't divisible by batch size")
         sys.exit(-1)
     else:
-        print("%d instances using batch size %d" % (num_instances, batch_size)
+        print("%d instances using batch size %d" % (num_instances, batch_size))
 
 
+    #### MEMORY SETUP ####
     # num_instance * (two semaphores, input, and output)
-    couter_size = 2 + num_instance
-    input_size  = num_instances * input_size
-    output_size = num_instances * output_size
+    counter_size = 2 + num_instances
+    total_input_size  = num_instances * INSTANCE_INPUT_SIZE
+    total_output_size = num_instances * INSTANCE_OUTPUT_SIZE
 
     # TODO understand what this extra memory is
     extra_size = 8
 
-    needed_memory_size = counter_size + input_size + output_size + extra_size
+    needed_memory_size = counter_size + total_input_size + total_output_size + extra_size
     shared_memory_size = roundup(needed_memory_size, ipc.PAGE_SIZE)
 
     try:
-        sm = ipc.SharedMemory( name, flags = 0, size = shared_memory_size )
+        sm = ipc.SharedMemory(name, flags=0, size=shared_memory_size )
     except Exception as ex:
-        sm = ipc.SharedMemory( name, flags = ipc.O_CREAT, size = shared_memory_size )
+        sm = ipc.SharedMemory(name, flags=ipc.O_CREAT, size=shared_memory_size )
 
     # memory layout of the shared memory:
     # | counter counter | input 1 | input 2 | .... |  8 bytes | output 1 | output 2| ..... |
@@ -96,22 +99,21 @@ def main():
     sm.close_fd()
 
     # Set up aliased names for the shared memory
-    mv  = np.frombuffer(mem, dtype = np.uint8, count = needed_memory_size);
+    mv  = np.frombuffer(mem, dtype=np.uint8, count=needed_memory_size);
     counter = mv[:counter_size]
-    inp     = mv[counter_size:counter_size + input_size]
+    inp     = mv[counter_size:counter_size + total_input_size]
     # TODO WHY EXTRASIZE????
-    memout =  mv[counter_size + input_size + extra_size:]
+    memout =  mv[counter_size + total_input_size + extra_size:]
 
 
-    #### NN eval setup ####
+    #### NN SETUP ####
     import nn # import our neural network
 
     # reset everything
     mv[:] = 0
 
     # num_instances = counter0 * 256 + counter1
-    counter[0] = num_instances // 256
-    counter[1] = num_instances %  256
+    counter[0:2] = divmod(num_instances, 256)
 
     smp_counter.release() # now clients can take this semaphore
 
@@ -123,19 +125,19 @@ def main():
     batches = num_instances // batch_size
     while True:
         for ii in range(batches):
-            start = ii * batch_size
-            end   = (ii+1) * batch_size - 1
+            first_instance = ii * batch_size
+            last_instance   = first_instance + batch_size
 
             # wait for data
             for i in range(batch_size):
-                smpB[start + i].acquire()
+                smpB[first_instance + i].acquire()
 
             # t1 = time.perf_counter()
             # print("delta t1 = ", t1 - t2)
             # t1 = time.perf_counter()
 
-            input_items_in = batch_size * input_size
-            dt = np.frombuffer(inp[start * input_size: end * input_size + 1], dtype=np.float32, count= items_in / SIZE_OF_FLOAT)
+            dt = np.frombuffer(inp[first_instance * INSTANCE_INPUT_SIZE: last_instance * INSTANCE_INPUT_SIZE], dtype=np.float32,
+                               count = batch_size * INSTANCE_INPUT_SIZE // SIZE_OF_FLOAT)
 
             nn.netlock.acquire(True)   # BLOCK HERE
             if checkNewNet(nn):
@@ -146,10 +148,12 @@ def main():
 
             qqq = net[1]().astype(np.float32)
             ttt = qqq.reshape(batch_size * OUTPUT_PREDICTIONS)
-            memout[start * output_size:end * output_size + 1] = ttt.view(dtype=np.uint8)
+
+
+            memout[first_instance * INSTANCE_OUTPUT_SIZE: last_instance * INSTANCE_OUTPUT_SIZE] = ttt.view(dtype=np.uint8)
 
             for i in range(batch_size):
-                smpA[start+i].release() # send result to client
+                smpA[first_instance + i].release() # send result to client
 
             # t2 = time.perf_counter()
             # print("delta t2 = ", t2- t1)
