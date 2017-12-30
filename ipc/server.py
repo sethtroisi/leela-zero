@@ -30,8 +30,6 @@ def createSMP(name):
     smp = ipc.Semaphore(name, ipc.O_CREAT)
     # Unlink semaphore so it deletes when the program exits
     smp.unlink()
-
-    # TODO can I just return smp???
     return ipc.Semaphore(name, ipc.O_CREAT)
 
 
