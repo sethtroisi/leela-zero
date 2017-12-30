@@ -17,7 +17,8 @@ SIZE_OF_INT = 4
 # prob of each move + prob of pass + eval of board position
 OUTPUT_PREDICTIONS = BOARD_SQUARES + 2
 
-INSTANCE_INPUT_SIZE   = SIZE_OF_FLOAT * INPUT_CHANNELS * BOARD_SQUARES
+INSTANCE_INPUTS       = INPUT_CHANNELS * BOARD_SQUARES
+INSTANCE_INPUT_SIZE   = SIZE_OF_FLOAT * INSTANCE_INPUTS
 INSTANCE_OUTPUT_SIZE  = SIZE_OF_FLOAT * OUTPUT_PREDICTIONS
 
 
@@ -70,15 +71,11 @@ def getReadyInstanceData(smpB, shared_input, batch_size):
 
             smpB[instance_id].acquire()
 
-            start_data = instance_id * INSTANCE_INPUT_SIZE
-            end_data = start_data + INSTANCE_INPUT_SIZE
-            count_data = INSTANCE_INPUT_SIZE // SIZE_OF_FLOAT
-
-            inp_data = shared_input[start_data : end_data]
-            dt = np.frombuffer(inp_data, dtype=np.float32, count=INSTANCE_INPUT_SIZE // SIZE_OF_FLOAT)
+            start_data = instance_id * INSTANCE_INPUTS
+            end_data = start_data + INSTANCE_INPUTS
 
             instance_ids.append(instance_id)
-            input_data.append(dt)
+            input_data.append(shared_input[start_data : end_data])
 
             if len(instance_ids) == batch_size:
                 dt = np.concatenate(input_data)
@@ -121,8 +118,8 @@ def main():
 
     # Set up aliased names for the shared memory
     mv  = np.frombuffer(mem, dtype=np.uint8, count=needed_memory_size);
-    counter = mv[:counter_size]
-    inp     = mv[counter_size:counter_size + total_input_size]
+    counter = mv[:counter_size].view(dtype=np.int32)
+    inp     = mv[counter_size:counter_size + total_input_size].view(dtype=np.float32)
     memout =  mv[counter_size + total_input_size:]
 
     smp_counter, smpA, smpB = createCounters(leename, num_instances)
@@ -134,8 +131,7 @@ def main():
     mv[:] = 0
 
     # set up counters as [num_instances, next available id]
-    dt = np.frombuffer(counter, dtype=np.int32, count = 2)
-    dt[:] = [num_instances, 0]
+    counter[:] = [num_instances, 0]
 
     smp_counter.release() # now clients can take this semaphore
 
@@ -158,11 +154,11 @@ def main():
         # t1 = time.perf_counter()
 
         qqq = net[1]().astype(np.float32)
-        ttt = qqq.reshape(batch_size * OUTPUT_PREDICTIONS).view(dtype=np.uint8)
+        sss = qqq.view(dtype = np.uint8)
 
         for i, instance_id in enumerate(instance_ids):
-            memout[instance_id * INSTANCE_OUTPUT_SIZE: (instance_id + 1) * INSTANCE_OUTPUT_SIZE] = \
-                ttt[i * INSTANCE_OUTPUT_SIZE: (i + 1) * INSTANCE_OUTPUT_SIZE]
+            memout[instance_id * INSTANCE_OUTPUT_SIZE:
+                  (instance_id + 1) * INSTANCE_OUTPUT_SIZE] = sss[i]
 
             smpA[instance_id].release() # send result to client
 
