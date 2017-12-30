@@ -61,6 +61,7 @@ void ProductionWorker::run() {
             (*m_movesOutstanding)++;
             outstanding++;
         } while (game.nextMove() && m_state == RUNNING);
+        (*m_movesOutstanding) -= outstanding;
 
         switch(m_state) {
         case RUNNING:
@@ -73,7 +74,6 @@ void ProductionWorker::run() {
                 auto end = std::chrono::high_resolution_clock::now();
                 auto gameDuration =
                     std::chrono::duration_cast<std::chrono::seconds>(end - start).count();
-                (*m_movesOutstanding) -= outstanding;
                 emit resultReady(game.getFile(), gameDuration);
             }
             QTextStream(stdout) << "Stopping engine." << endl;
