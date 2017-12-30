@@ -61,6 +61,7 @@ void ProductionWorker::run() {
             (*m_movesOutstanding)++;
             outstanding++;
         } while (game.nextMove() && m_state == RUNNING);
+
         switch(m_state) {
         case RUNNING:
             QTextStream(stdout) << "Game has ended." << endl;
@@ -172,7 +173,7 @@ void Production::startGames() {
             }
             m_gamesThreads[thread_index].init(myGpu, m_network, &m_movesMade, &m_movesOutstanding);
             m_gamesThreads[thread_index].start();
-            usleep(50 * 1000);
+            usleep(100 * 1000);
         }
     }
 
@@ -180,7 +181,6 @@ void Production::startGames() {
 
     while (true) {
         sleep(2 * 60 + 1);
-
         QTextStream(stdout) << "" << endl << endl;
         m_gamesPlayed++;
         printTimingInfo(0);
