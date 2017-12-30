@@ -73,6 +73,7 @@ static std::vector<std::vector<float>> batchnorm_means;
 static std::vector<std::vector<float>> batchnorm_variances;
 
 // Policy head
+#if !defined(USE_IPC) || defined(USE_IPC_TEST)
 static std::vector<float> conv_pol_w;
 static std::vector<float> conv_pol_b;
 static std::array<float, 2> bn_pol_w1;
@@ -92,6 +93,7 @@ static std::array<float, 256> ip1_val_b;
 
 static std::array<float, 256> ip2_val_w;
 static std::array<float, 1> ip2_val_b;
+#endif
 
 using namespace boost::interprocess;
 int batch_size;
@@ -131,8 +133,8 @@ void Network::initialize(void) {
 #ifdef USE_IPC
     myprintf("Initializing shared memory and semaphores\n");
 
-    std::string pname(getenv ("LEELAZ"));
-    if (pname.empty()) pname = "lee";
+    auto env_name = getenv("LEELAZ");
+    std::string pname(env_name == nullptr ? "lee" : env_name);
 
     std::string shared_mem_name = "/sm" + pname;
     shmem= shared_memory_object(open_only, shared_mem_name.c_str(), read_write);
@@ -488,8 +490,8 @@ Network::Netresult Network::get_scored_moves_internal(
     float winrate_sig;
 
 #ifdef USE_IPC
-    std::string pname = getenv ("LEELAZ");
-    if (pname.empty()) pname = "lee";
+    auto env_name = getenv("LEELAZ");
+    std::string pname(env_name == nullptr ? "lee" : env_name);
 
     char name[100];
     sprintf(name, "/%s_A_%d", pname.c_str(), myid);
