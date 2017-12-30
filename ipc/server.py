@@ -75,13 +75,13 @@ def getReadyInstanceData(smpB, shared_input, batch_size):
             count_data = INSTANCE_INPUT_SIZE // SIZE_OF_FLOAT
 
             inp_data = shared_input[start_data : end_data]
-            dt = np.frombuffer(inp_data, dtype=np.uint8, count=INSTANCE_INPUT_SIZE)
+            dt = np.frombuffer(inp_data, dtype=np.float32, count=INSTANCE_INPUT_SIZE // SIZE_OF_FLOAT)
 
             instance_ids.append(instance_id)
             input_data.append(dt)
 
             if len(instance_ids) == batch_size:
-                dt = np.concatenate(input_data).view(dtype=np.float32)
+                dt = np.concatenate(input_data)
                 return instance_ids, dt
 
 
@@ -145,11 +145,6 @@ def main():
 
     # t2 = time.perf_counter()
     while True:
-
-        # t1 = time.perf_counter()
-        # print("delta t1 = ", t1 - t2)
-        # t1 = time.perf_counter()
-
         nn.netlock.acquire(True)   # BLOCK HERE
         if checkNewNet(nn):
             net = nn.net
@@ -157,7 +152,10 @@ def main():
 
         instance_ids, dt = getReadyInstanceData(smpB, inp, batch_size)
         net[0].set_value(dt.reshape( (batch_size, INPUT_CHANNELS, BOARD_SIZE, BOARD_SIZE) ) )
-        print (instance_ids)
+
+        # t1 = time.perf_counter()
+        # print("delta t1 = ", t1 - t2)
+        # t1 = time.perf_counter()
 
         qqq = net[1]().astype(np.float32)
         ttt = qqq.reshape(batch_size * OUTPUT_PREDICTIONS).view(dtype=np.uint8)
