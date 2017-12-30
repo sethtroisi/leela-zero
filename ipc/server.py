@@ -1,133 +1,163 @@
-import time
+import gc
 import mmap
 import os
 import sys
-import numpy as np
-
-import posix_ipc as ipc
-
-if len(sys.argv) != 3 :
-    print("Usage: %s num-instances batch-size" % sys.argv[0])
-    sys.exit(-1)
-
-if "LEELAZ" in os.environ:
-    leename= os.environ["LEELAZ"]
-else:
-    leename = "lee"
-
-print("Using batch name: ", leename)
-
-num_instances = int(sys.argv[1])
-realbs = int(sys.argv[2])               # real batch size
-
-if num_instances % realbs != 0:
-    print("Error: number of instances isn't divisible by batch size")
-    sys.exit(-1)
-
-name = "/sm%s" % leename  # shared memory name
-input_size   = 4*18*19*19
-output_size = 4 * (19*19 + 2)
-
-def roundup(size, page_size):
-    import math
-    s =  int( math.ceil(size/page_size)*page_size )
-    return s
-
-def createSMP(name):
-    smp= ipc.Semaphore(name, ipc.O_CREAT)
-    smp.unlink()
-    return ipc.Semaphore(name, ipc.O_CREAT)
-
-try:
-    sm = ipc.SharedMemory( name, flags = 0, size = roundup(2 + num_instances + input_size*num_instances + 8  + num_instances*output_size, ipc.PAGE_SIZE) )
-except Exception as ex:
-    sm = ipc.SharedMemory( name, flags = ipc.O_CREAT, size = roundup(2 + num_instances + input_size*num_instances + 8  + num_instances*output_size, ipc.PAGE_SIZE) )
-
-# memory layout of the shared memory:
-# | counter counter | input 1 | input 2 | .... |  8 bytes | output 1 | output 2| ..... |
-
-smp_counter =  createSMP("/%s_counter" % leename) # counter semaphore
-
-smpA = []
-smpB = []
-for i in range(num_instances):
-    smpA.append(createSMP("/%s_A_%d" % (leename,i)))    # two semaphores for each instance
-    smpB.append(createSMP("/%s_B_%d" % (leename,i)))
-
-mem = mmap.mmap(sm.fd, sm.size)
-sm.close_fd()
-
-mv  = np.frombuffer(mem, dtype=np.uint8, count= 2 + num_instances + input_size*num_instances + 8  + num_instances*output_size)
-counter = mv[0:2+num_instances]
-inp     = mv[  2+num_instances:2+num_instances + input_size*num_instances]
-memout =  mv[                  2+num_instances + input_size*num_instances + 8:]
-
-import nn # import our neural network
-
-# reset everything
-mv[:] = 0
-
-counter[0] = num_instances // 256   # num_instances = counter0 * 256 + counter1
-counter[1] = num_instances %  256
-
-smp_counter.release() # now clients can take this semaphore
-
-# waiting clients to connect
-print("Waiting for %d autogtp instances to run" % num_instances)
-# for i in range(bsize):
-#     smpB[i].acquire()
-#
-# print("OK Go!")
-
-# now all clients connected
-# dt = np.zeros( bs*bsize // 4, dtype=np.float32)
-
-net = nn.net
-import gc
 import time
 
-# t2 = time.perf_counter()
-numiter = num_instances // realbs
+import posix_ipc as ipc
+import numpy as np
 
 
-while True:
-    for ii in range(numiter):
-        start = ii * realbs
-        # print(c)
+BOARD_SIZE = 19
+BOARD_SQUARES = BOARD_SIZE ** 2
+INPUT_CHANNELS = 18
+SIZE_OF_FLOAT = 4
 
-        # wait for data
-        for i in range(realbs):
-            smpB[start + i].acquire()
+INPUT_SIZE   = SIZE_OF_FLOAT * INPUT_CHANNELS * BOARD_SQUARES
+# prob of each move + prob of pass + eval of board position
+OUTPUT_PREDICTIONS = BOARD_SQUARES + 2
+OUTPUT_SIZE  = SIZE_OF_FLOAT * OUTPUT_PREDICTIONS
 
-        # t1 = time.perf_counter()
-        # print("delta t1 = ", t1 - t2)
-        # t1 = time.perf_counter()
-
-        dt = np.frombuffer(inp[(start+ 0)*input_size: (start+ realbs)*input_size], dtype=np.float32, count=input_size*realbs // 4)
-
-        nn.netlock.acquire(True)   # BLOCK HERE
-        if nn.newNetWeight != None:
-            nn.net = None
-            gc.collect()  # hope that GPU memory is freed, not sure :-()
-            weights, numBlocks, numFilters = nn.newNetWeight
-            print(" %d channels and %d blocks" % (numFilters, numBlocks) )
-            nn.net = nn.LZN(weights, numBlocks, numFilters)
-            net = nn.net
-            print("...updated weight!")
-            nn.newNetWeight = None
-        nn.netlock.release()
+def roundup(size, page_size):
+    return size + size * (size % page_size > 0)
 
 
-        net[0].set_value(dt.reshape( (realbs, 18, 19, 19) ) )
+def createSMP(name):
+    smp = ipc.Semaphore(name, ipc.O_CREAT)
+    # Unlink semaphore so it deletes when the program exits
+    smp.unlink()
 
-        qqq = net[1]().astype(np.float32)
-        ttt = qqq.reshape(realbs * (19*19+2))
-        #print(len(ttt)*4, len(memout))
-        memout[(start+0)*output_size:(start+realbs)*output_size] = ttt.view(dtype=np.uint8)
+    # TODO can I just return smp???
+    return ipc.Semaphore(name, ipc.O_CREAT)
 
-        for i in range(realbs):
-            smpA[start+i].release() # send result to client
-        # t2 = time.perf_counter()
-        # print("delta t2 = ", t2- t1)
-        # t2 = time.perf_counter()
 
+def createCounters(name, num_instances):
+    smp_counter =  createSMP("/%s_counter" % name) # counter semaphore
+
+    smpA = []
+    smpB = []
+    for i in range(num_instances):
+        smpA.append(createSMP("/%s_A_%d" % (name,i)))    # two semaphores for each instance
+        smpB.append(createSMP("/%s_B_%d" % (name,i)))
+
+    return smp_counter, smpA, smpB
+
+def checkNewNet(nn):
+    if not nn.newNetWeight:
+        return False
+    nn.net = None
+    gc.collect()  # hope that GPU memory is freed, not sure :-()
+    weights, numBlocks, numFilters = nn.newNetWeight
+    print(" %d channels and %d blocks" % (numFilters, numBlocks) )
+    nn.net = nn.LZN(weights, numBlocks, numFilters)
+    print("...updated weight!")
+    nn.newNetWeight = None
+    return True
+
+def main():
+    leename = os.environ.get("LEELAZ", "lee")
+    name = "/sm" + leename  # shared memory name
+    print("Using batch name: ", leename)
+
+    num_instances = int(sys.argv[1])
+    batch_size = int(sys.argv[2])               # real batch size
+
+    if num_instances % batch_size != 0:
+        print("Error: number of instances isn't divisible by batch size")
+        sys.exit(-1)
+    else:
+        print("%d instances using batch size %d" % (num_instances, batch_size)
+
+
+    # num_instance * (two semaphores, input, and output)
+    couter_size = 2 + num_instance
+    input_size  = num_instances * input_size
+    output_size = num_instances * output_size
+
+    # TODO understand what this extra memory is
+    extra_size = 8
+
+    needed_memory_size = counter_size + input_size + output_size + extra_size
+    shared_memory_size = roundup(needed_memory_size, ipc.PAGE_SIZE)
+
+    try:
+        sm = ipc.SharedMemory( name, flags = 0, size = shared_memory_size )
+    except Exception as ex:
+        sm = ipc.SharedMemory( name, flags = ipc.O_CREAT, size = shared_memory_size )
+
+    # memory layout of the shared memory:
+    # | counter counter | input 1 | input 2 | .... |  8 bytes | output 1 | output 2| ..... |
+    # TODO WHY THE EXTRA 8 BYTES???
+
+    # TODO are these in shared memory? how?
+    smp_counter, smpA, smpB = createCounters(leename, num_instances)
+
+    mem = mmap.mmap(sm.fd, sm.size)
+    sm.close_fd()
+
+    # Set up aliased names for the shared memory
+    mv  = np.frombuffer(mem, dtype = np.uint8, count = needed_memory_size);
+    counter = mv[:counter_size]
+    inp     = mv[counter_size:counter_size + input_size]
+    # TODO WHY EXTRASIZE????
+    memout =  mv[counter_size + input_size + extra_size:]
+
+
+    #### NN eval setup ####
+    import nn # import our neural network
+
+    # reset everything
+    mv[:] = 0
+
+    # num_instances = counter0 * 256 + counter1
+    counter[0] = num_instances // 256
+    counter[1] = num_instances %  256
+
+    smp_counter.release() # now clients can take this semaphore
+
+    print("Waiting for %d autogtp instances to run" % num_instances)
+
+    net = nn.net
+
+    # t2 = time.perf_counter()
+    batches = num_instances // batch_size
+    while True:
+        for ii in range(batches):
+            start = ii * batch_size
+            end   = (ii+1) * batch_size - 1
+
+            # wait for data
+            for i in range(batch_size):
+                smpB[start + i].acquire()
+
+            # t1 = time.perf_counter()
+            # print("delta t1 = ", t1 - t2)
+            # t1 = time.perf_counter()
+
+            input_items_in = batch_size * input_size
+            dt = np.frombuffer(inp[start * input_size: end * input_size + 1], dtype=np.float32, count= items_in / SIZE_OF_FLOAT)
+
+            nn.netlock.acquire(True)   # BLOCK HERE
+            if checkNewNet(nn):
+                net = nn.net
+            nn.netlock.release()
+
+            net[0].set_value(dt.reshape( (batch_size, INPUT_CHANNELS, BOARD_SIZE, BOARD_SIZE) ) )
+
+            qqq = net[1]().astype(np.float32)
+            ttt = qqq.reshape(batch_size * OUTPUT_PREDICTIONS)
+            memout[start * output_size:end * output_size + 1] = ttt.view(dtype=np.uint8)
+
+            for i in range(batch_size):
+                smpA[start+i].release() # send result to client
+
+            # t2 = time.perf_counter()
+            # print("delta t2 = ", t2- t1)
+            # t2 = time.perf_counter()
+
+if __name__ == "__main__":
+    if len(sys.argv) != 3 :
+        print("Usage: %s num-instances batch-size" % sys.argv[0])
+        sys.exit(-1)
+
+    main()
