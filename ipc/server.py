@@ -77,10 +77,7 @@ def main():
     total_input_size  = num_instances * INSTANCE_INPUT_SIZE
     total_output_size = num_instances * INSTANCE_OUTPUT_SIZE
 
-    # TODO understand what this extra memory is
-    extra_size = 8
-
-    needed_memory_size = counter_size + total_input_size + total_output_size + extra_size
+    needed_memory_size = counter_size + total_input_size + total_output_size
     shared_memory_size = roundup(needed_memory_size, ipc.PAGE_SIZE)
 
     try:
@@ -89,8 +86,7 @@ def main():
         sm = ipc.SharedMemory(name, flags=ipc.O_CREAT, size=shared_memory_size )
 
     # memory layout of the shared memory:
-    # | counter counter | input 1 | input 2 | .... |  8 bytes | output 1 | output 2| ..... |
-    # TODO WHY THE EXTRA 8 BYTES???
+    # | counter counter | input 1 | input 2 | .... |  output 1 | output 2| ..... |
 
     # TODO are these in shared memory? how?
     smp_counter, smpA, smpB = createCounters(leename, num_instances)
@@ -102,8 +98,7 @@ def main():
     mv  = np.frombuffer(mem, dtype=np.uint8, count=needed_memory_size);
     counter = mv[:counter_size]
     inp     = mv[counter_size:counter_size + total_input_size]
-    # TODO WHY EXTRASIZE????
-    memout =  mv[counter_size + total_input_size + extra_size:]
+    memout =  mv[counter_size + total_input_size:]
 
 
     #### NN SETUP ####
