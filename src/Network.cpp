@@ -95,6 +95,7 @@ static std::array<float, 1> ip2_val_b;
 
 using namespace boost::interprocess;
 int batch_size;
+int * counter_mem;
 unsigned char * input_mem;
 unsigned char * output_mem;
 
@@ -129,52 +130,38 @@ void Network::benchmark(GameState * state, int iterations) {
 void Network::initialize(void) {
 #ifdef USE_IPC
     myprintf("Initializing shared memory and semaphores\n");
-    offset_t size;
 
-    char* pname = getenv ("LEELAZ");
-    if (pname == NULL) pname = "lee";
-    char name[100];
+    std::string pname(getenv ("LEELAZ"));
+    if (pname.empty()) pname = "lee";
 
-    sprintf(name, "/sm%s", pname);
-
-    shmem= shared_memory_object(open_only, name, read_write);
+    std::string shared_mem_name = "/sm" + pname;
+    shmem= shared_memory_object(open_only, shared_mem_name.c_str(), read_write);
     region = mapped_region(shmem, read_write);
 
     mem = static_cast<unsigned char*>(region.get_address());
+    counter_mem = static_cast<int*>(region.get_address());
 
-    batch_size = int(mem[0]) * 256 + int(mem[1]);
-    myprintf("batch size: %d\n", batch_size);
-    // shmem.truncate(2 + batch_size + 4*batch_size*18*19*19 + batch_size*4*(19*19+2));
-
+    offset_t size;
     shmem.get_size(size);
     myprintf("size %d\n", size);
 
-    sprintf(name, "/%s_counter", pname);
-    named_semaphore sem_counter{open_only, name};
+    std::string semaphore_name = "/" + pname + "_counter";
+    named_semaphore sem_counter{open_only, semaphore_name.c_str()};
     sem_counter.wait();
 
-    // grab id and increment
-    myid = 256 * mem[2+1] + mem[2+2];
-    mem[2+1] = (myid + 1) / 256;
-    mem[2+2] = (myid + 1) % 256;
+    batch_size = counter_mem[0];
+    myid = counter_mem[1];
+    counter_mem[1]++;
 
     sem_counter.post();
 
+    myprintf("batch size: %d\n", batch_size);
     myprintf("My ID is %d\n", myid);
+    assert(0 <= myid && myid < batch_size);
+    assert(1 <= batch_size && batch_size <= 512);
 
-    input_mem =  mem + 4 + myid * 4*18*19*19;
-    output_mem = mem + 4 + 4*batch_size*18*19*19 + myid * 4*(19*19+2);
-
-    // char name[100];
-
-    // sprintf(name, "lee_A_%d", myid);
-    // named_semaphore sem_A{open_only, name};
-
-    // sprintf(name, "lee_B_%d", myid);
-    // named_semaphore sem_B{open_only, name};
-    // sem_B.post();
-
-
+    input_mem =  mem + 4 * (2 + myid*18*19*19);
+    output_mem = mem + 4 * (2 + batch_size*18*19*19 + myid * (19*19+2));
 
 #endif
 
@@ -473,11 +460,10 @@ Network::Netresult Network::get_scored_moves_internal(
     assert(INPUT_CHANNELS == planes.size());
     constexpr int width = 19;
     constexpr int height = 19;
-#ifdef USE_IPC_TEST
+
+    std::vector<float> softmax_data((width * height) + 1);
+#if !defined(USE_IPC) || defined(USE_IPC_TEST)
     const auto convolve_channels = conv_pol_w.size() / conv_pol_b.size();
-#else
-    const auto convolve_channels = 128; // conv_pol_w.size() / conv_pol_b.size();
-#endif
     std::vector<net_t> input_data;
     std::vector<net_t> output_data(convolve_channels * width * height);
     std::vector<float> policy_data_1(2 * width * height);
@@ -485,10 +471,8 @@ Network::Netresult Network::get_scored_moves_internal(
     std::vector<float> value_data_1(1 * width * height);
     std::vector<float> value_data_2(1 * width * height);
     std::vector<float> policy_out((width * height) + 1);
-    std::vector<float> softmax_data((width * height) + 1);
     std::vector<float> winrate_data(256);
     std::vector<float> winrate_out(1);
-#if !defined(USE_IPC) || defined(USE_IPC_TEST)
     // Data layout is input_data[(c * height + h) * width + w]
     input_data.reserve(INPUT_CHANNELS * width * height);
     for (int c = 0; c < INPUT_CHANNELS; ++c) {
@@ -500,18 +484,18 @@ Network::Netresult Network::get_scored_moves_internal(
         }
     }
 #endif
+
+    float winrate_sig;
+
 #ifdef USE_IPC
+    std::string pname = getenv ("LEELAZ");
+    if (pname.empty()) pname = "lee";
 
     char name[100];
-
-
-    char* pname = getenv ("LEELAZ");
-    if (pname == NULL) pname = "lee";
-
-    sprintf(name, "/%s_A_%d", pname, myid);
+    sprintf(name, "/%s_A_%d", pname.c_str(), myid);
     named_semaphore sem_A{open_only, name};
 
-    sprintf(name, "/%s_B_%d", pname, myid);
+    sprintf(name, "/%s_B_%d", pname.c_str(), myid);
     named_semaphore sem_B{open_only, name};
 
     float * my_input_data = reinterpret_cast<float *>(input_mem);
@@ -532,47 +516,21 @@ Network::Netresult Network::get_scored_moves_internal(
 
     softmax(my_policy_out, softmax_data, cfg_softmax_temp);
 
-    std::vector<float>& outputs = softmax_data;
-    float winrate_sig = (1.0f + myout[19*19+1]) / 2.0f;
-    // printf("My threadID %d with socket id %d\n", idx, thread_pool.udpconnections[idx]++);
+    float my_winrate_sig = (1.0f + myout[19*19+1]) / 2.0f;
+    winrate_sig = my_winrate_sig;
 
-    // Uncomment bellow for testing purpose, comparing with the OpenCL results
-    // BEGIN TESTING HERE
-#ifdef USE_IPC_TEST
-    opencl_net.forward(input_data, output_data);
-    // Get the moves
-    convolve<1, 2>(output_data, conv_pol_w, conv_pol_b, policy_data_1);
-    batchnorm<2, 361>(policy_data_1, bn_pol_w1, bn_pol_w2, policy_data_2);
-    innerproduct<2*361, 362>(policy_data_2, ip_pol_w, ip_pol_b, policy_out);
-
-    for (int i = 0; i < 19*19 + 1; i++) {
-        if (fabs(policy_out[i] - my_policy_out[i]) > 1e-5) {
-            printf("ERRORRRRR %f \n", fabs(policy_out[i] - my_policy_out[i]));
-        }
-    }
-
-    // Now get the score
-    convolve<1, 1>(output_data, conv_val_w, conv_val_b, value_data_1);
-    batchnorm<1, 361>(value_data_1, bn_val_w1, bn_val_w2, value_data_2);
-    innerproduct<361, 256>(value_data_2, ip1_val_w, ip1_val_b, winrate_data);
-    innerproduct<256, 1>(winrate_data, ip2_val_w, ip2_val_b, winrate_out);
-
-    // Sigmoid
-    float mywinrate_sig = (1.0f + std::tanh(winrate_out[0])) / 2.0f;
-
-    if (fabs(mywinrate_sig - winrate_sig) > 1e-5) {
-        printf("ERR delta winrate %f\n", fabs(mywinrate_sig - winrate_sig));
-    }
+    #if defined(USE_IPC_TEST) && !defined(USE_OPENCL)
+        #error "Must turn on USE_OPENCL when using USE_IPC_TEST"
+    #endif
 #endif
-    // END TESTING HERE
-#elif defined(USE_OPENCL)
+
+#if defined(USE_OPENCL)
     opencl_net.forward(input_data, output_data);
     // Get the moves
     convolve<1, 2>(output_data, conv_pol_w, conv_pol_b, policy_data_1);
     batchnorm<2, 361>(policy_data_1, bn_pol_w1, bn_pol_w2, policy_data_2);
     innerproduct<2*361, 362>(policy_data_2, ip_pol_w, ip_pol_b, policy_out);
     softmax(policy_out, softmax_data, cfg_softmax_temp);
-    std::vector<float>& outputs = softmax_data;
 
     // Now get the score
     convolve<1, 1>(output_data, conv_val_w, conv_val_b, value_data_1);
@@ -581,18 +539,33 @@ Network::Netresult Network::get_scored_moves_internal(
     innerproduct<256, 1>(winrate_data, ip2_val_w, ip2_val_b, winrate_out);
 
     // Sigmoid
-    float winrate_sig = (1.0f + std::tanh(winrate_out[0])) / 2.0f;
+    winrate_sig = (1.0f + std::tanh(winrate_out[0])) / 2.0f;
+
+    // BEGIN TESTING HERE
+    #ifdef USE_IPC_TEST
+    for (int i = 0; i < 19*19 + 1; i++) {
+        if (fabs(policy_out[i] - my_policy_out[i]) > 1e-5) {
+            printf("ERRORRRRR %f \n", fabs(policy_out[i] - my_policy_out[i]));
+        }
+    }
+
+    if (fabs(winrate_sig - my_winrate_sig) > 1e-5) {
+        printf("ERR delta winrate %f\n", fabs(winrate_sig - my_winrate_sig));
+    }
+    #endif
+    // END TESTING HERE
 #elif defined(USE_BLAS) && !defined(USE_OPENCL)
 #error "Not implemented"
     // Not implemented yet - not very useful unless you have some
     // sort of Xeon Phi
     softmax(output_data, softmax_data, cfg_softmax_temp);
     // Move scores
-    std::vector<float>& outputs = softmax_data;
 #endif
 
-    std::vector<scored_node> result;
+    std::vector<float>& outputs = softmax_data;
     assert(outputs.size() == 362);
+
+    std::vector<scored_node> result;
     idx = 0;
     for (int h = 0; h < height; ++h) {
         for (int w = 0; w < width; ++w, ++idx) {

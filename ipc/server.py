@@ -12,6 +12,7 @@ BOARD_SIZE = 19
 BOARD_SQUARES = BOARD_SIZE ** 2
 INPUT_CHANNELS = 18
 SIZE_OF_FLOAT = 4
+SIZE_OF_INT = 4
 
 # prob of each move + prob of pass + eval of board position
 OUTPUT_PREDICTIONS = BOARD_SQUARES + 2
@@ -72,8 +73,8 @@ def main():
 
 
     #### MEMORY SETUP ####
-    # num_instance * (two semaphores, input, and output)
-    counter_size = 4
+    # 2 counters + num_instance * (input + output)
+    counter_size = 2 * SIZE_OF_INT
     total_input_size  = num_instances * INSTANCE_INPUT_SIZE
     total_output_size = num_instances * INSTANCE_OUTPUT_SIZE
 
@@ -104,10 +105,10 @@ def main():
     # reset everything
     mv[:] = 0
 
-    # num_instances = counter0 * 256 + counter1
-    counter[0:2] = divmod(num_instances, 256)
-    # first unclaimed id
-    counter[2:4] = (0, 0)
+    # batch_size, id
+    dt = np.frombuffer(counter, dtype=np.int32, count = 2)
+    dt[:] = [num_instances, 0]
+
 
     smp_counter.release() # now clients can take this semaphore
 
@@ -142,8 +143,6 @@ def main():
 
             qqq = net[1]().astype(np.float32)
             ttt = qqq.reshape(batch_size * OUTPUT_PREDICTIONS)
-
-
             memout[first_instance * INSTANCE_OUTPUT_SIZE: last_instance * INSTANCE_OUTPUT_SIZE] = ttt.view(dtype=np.uint8)
 
             for i in range(batch_size):
