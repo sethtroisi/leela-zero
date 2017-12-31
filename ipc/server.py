@@ -130,11 +130,11 @@ def main():
         # print("delta t1 = ", t1 - t2)
         # t1 = time.perf_counter()
 
-        nn.netlock.acquire(True)   # BLOCK HERE
+        nn.netlock.acquire(True)   # BLOCK NET WEIGHTS HERE
         nn.net[0].set_value(dt.reshape( (batch_size, INPUT_CHANNELS, BOARD_SIZE, BOARD_SIZE) ) )
 
         qqq = nn.net[1]().astype(np.float32)
-        nn.netlock.release()       # RELEASE HERE
+        nn.netlock.release()       # RELEASE NET WEIGHTS HERE
         sss = qqq.view(dtype = np.uint8)
 
         for i, instance_id in enumerate(instance_ids):

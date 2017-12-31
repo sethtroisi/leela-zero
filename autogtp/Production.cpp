@@ -154,7 +154,6 @@ bool Production::updateNetwork() {
 }
 
 void Production::startGames() {
-    m_start = std::chrono::high_resolution_clock::now();
     m_mainMutex->lock();
     updateNetwork();
     QString myGpu;
@@ -173,7 +172,7 @@ void Production::startGames() {
             }
             m_gamesThreads[thread_index].init(myGpu, m_network, &m_movesMade, &m_movesOutstanding);
             m_gamesThreads[thread_index].start();
-            usleep(100 * 1000);
+            usleep(50 * 1000);
         }
     }
 
