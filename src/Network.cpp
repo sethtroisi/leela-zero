@@ -135,8 +135,8 @@ void Network::initialize(void) {
 
     auto env_name = getenv("LEELAZ");
     std::string pname(env_name == nullptr ? "lee" : env_name);
-
     std::string shared_mem_name = "/sm" + pname;
+
     shmem= shared_memory_object(open_only, shared_mem_name.c_str(), read_write);
     region = mapped_region(shmem, read_write);
 
@@ -492,7 +492,7 @@ Network::Netresult Network::get_scored_moves_internal(
 #ifdef USE_IPC
     auto env_name = getenv("LEELAZ");
     std::string pname(env_name == nullptr ? "lee" : env_name);
-
+    
     char name[100];
     sprintf(name, "/%s_A_%d", pname.c_str(), myid);
     named_semaphore sem_A{open_only, name};

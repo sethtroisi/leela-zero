@@ -7,6 +7,7 @@ import time
 import posix_ipc as ipc
 import numpy as np
 
+import nn # import our neural network
 
 BOARD_SIZE = 19
 BOARD_SQUARES = BOARD_SIZE ** 2
@@ -45,10 +46,45 @@ def createCounters(name, num_instances):
     return smp_counter, smpA, smpB
 
 
+def setupMemory(leename, num_instances):
+    mem_name = "/sm" + leename  # shared memory name
+    # 2 counters + num_instance * (input + output)
+    counter_size = 2 * SIZE_OF_INT
+    total_input_size  = num_instances * INSTANCE_INPUT_SIZE
+    total_output_size = num_instances * INSTANCE_OUTPUT_SIZE
+
+    needed_memory_size = counter_size + total_input_size + total_output_size
+    shared_memory_size = roundup(needed_memory_size, ipc.PAGE_SIZE)
+
+    try:
+        sm = ipc.SharedMemory(mem_name, flags=0, size=shared_memory_size)
+    except Exception as ex:
+        sm = ipc.SharedMemory(mem_name, flags=ipc.O_CREAT, size=shared_memory_size)
+
+    # memory layout of the shared memory:
+    # | counter counter | id id | input 1 | input 2 | .... |  output 1 | output 2| ..... |
+    mem = mmap.mmap(sm.fd, sm.size)
+    sm.close_fd()
+
+    # Set up aliased names for the shared memory
+    mv  = np.frombuffer(mem, dtype=np.uint8, count=needed_memory_size);
+    counter    = mv[:counter_size].view(dtype=np.int32)
+    input_mem  = mv[counter_size:counter_size + total_input_size].view(dtype=np.float32)
+    output_mem = mv[counter_size + total_input_size:]
+
+    # reset all shared memory
+    mv[:] = 0
+
+    return counter, input_mem, output_mem
+
+
 def getReadyInstanceData(smpB, shared_input, batch_size):
     instance_ids = []
     input_data = []
     while len(instance_ids) < batch_size:
+        # sleep a tiny fraction of second to help with CPU usage
+        time.sleep(1e-5)
+
         for instance_id, input_ready_smp in enumerate(smpB):
             # not ready to acquire
             if input_ready_smp.value <= 0:
@@ -67,9 +103,28 @@ def getReadyInstanceData(smpB, shared_input, batch_size):
                 return instance_ids, dt
 
 
+def runNN(instance_ids, input_data, memout, smpA):
+    # t1 = time.perf_counter()
+
+    nn.netlock.acquire(True)   # BLOCK NET WEIGHTS HERE
+    nn.net[0].set_value(input_data.reshape(
+        (len(instance_ids), INPUT_CHANNELS, BOARD_SIZE, BOARD_SIZE)))
+    qqq = nn.net[1]().astype(np.float32)
+    nn.netlock.release()       # RELEASE NET WEIGHTS HERE
+
+    sss = qqq.view(dtype = np.uint8)
+    for i, instance_id in enumerate(instance_ids):
+        memout[instance_id * INSTANCE_OUTPUT_SIZE:
+              (instance_id + 1) * INSTANCE_OUTPUT_SIZE] = sss[i]
+
+        smpA[instance_id].release() # send result to client
+
+    # t2 = time.perf_counter()
+    # print("delta run_nn = ", t2- t1)
+
+
 def main():
     leename = os.environ.get("LEELAZ", "lee")
-    name = "/sm" + leename  # shared memory name
     print("Using batch name: ", leename)
 
     num_instances = int(sys.argv[1])
@@ -81,39 +136,8 @@ def main():
     else:
         print("%d instances using batch size %d" % (num_instances, batch_size))
 
-
-    #### MEMORY SETUP ####
-    # 2 counters + num_instance * (input + output)
-    counter_size = 2 * SIZE_OF_INT
-    total_input_size  = num_instances * INSTANCE_INPUT_SIZE
-    total_output_size = num_instances * INSTANCE_OUTPUT_SIZE
-
-    needed_memory_size = counter_size + total_input_size + total_output_size
-    shared_memory_size = roundup(needed_memory_size, ipc.PAGE_SIZE)
-
-    try:
-        sm = ipc.SharedMemory(name, flags=0, size=shared_memory_size )
-    except Exception as ex:
-        sm = ipc.SharedMemory(name, flags=ipc.O_CREAT, size=shared_memory_size )
-
-    # memory layout of the shared memory:
-    # | counter counter | id id | input 1 | input 2 | .... |  output 1 | output 2| ..... |
-    mem = mmap.mmap(sm.fd, sm.size)
-    sm.close_fd()
-
-    # Set up aliased names for the shared memory
-    mv  = np.frombuffer(mem, dtype=np.uint8, count=needed_memory_size);
-    counter = mv[:counter_size].view(dtype=np.int32)
-    inp     = mv[counter_size:counter_size + total_input_size].view(dtype=np.float32)
-    memout =  mv[counter_size + total_input_size:]
-
+    counter, input_mem, output_mem = setupMemory(leename, num_instances)
     smp_counter, smpA, smpB = createCounters(leename, num_instances)
-
-    #### NN SETUP ####
-    import nn # import our neural network
-
-    # reset everything
-    mv[:] = 0
 
     # set up counters as [num_instances, next available id]
     counter[:] = [num_instances, 0]
@@ -122,30 +146,22 @@ def main():
 
     print("Waiting for %d autogtp instances to run" % num_instances)
 
-    # t2 = time.perf_counter()
+    minibatches_run = 0
     while True:
-        instance_ids, dt = getReadyInstanceData(smpB, inp, batch_size)
-
-        # t1 = time.perf_counter()
-        # print("delta t1 = ", t1 - t2)
         # t1 = time.perf_counter()
 
-        nn.netlock.acquire(True)   # BLOCK NET WEIGHTS HERE
-        nn.net[0].set_value(dt.reshape( (batch_size, INPUT_CHANNELS, BOARD_SIZE, BOARD_SIZE) ) )
+        instance_ids, dt = getReadyInstanceData(smpB, input_mem, batch_size)
+        assert len(instance_ids) == batch_size
 
-        qqq = nn.net[1]().astype(np.float32)
-        nn.netlock.release()       # RELEASE NET WEIGHTS HERE
-        sss = qqq.view(dtype = np.uint8)
-
-        for i, instance_id in enumerate(instance_ids):
-            memout[instance_id * INSTANCE_OUTPUT_SIZE:
-                  (instance_id + 1) * INSTANCE_OUTPUT_SIZE] = sss[i]
-
-            smpA[instance_id].release() # send result to client
+        if minibatches_run % 1000 == 0:
+            print("\tminibatch iteration ", minibatches_run)
 
         # t2 = time.perf_counter()
-        # print("delta t2 = ", t2- t1)
-        # t2 = time.perf_counter()
+        # print("delta get_data = ", t2 - t1)
+
+        # TODO try to thread this or getReadyInstanceData
+        runNN(instance_ids, dt, output_mem, smpA)
+        minibatches_processed += 1
 
 if __name__ == "__main__":
     if len(sys.argv) != 3 :

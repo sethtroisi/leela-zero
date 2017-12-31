@@ -228,7 +228,7 @@ class MyWeightUpdater(threading.Thread):
                 newhash = getLatestNNHash()
                 if newhash != nethash:
                     txt = downloadBestNetworkWeight(newhash)
-                    print("New net arrived")
+                    print("New net arrived: ", newhash)
                     nethash = newhash
                     weights, numBlocks, numFilters = loadWeight(txt)
 

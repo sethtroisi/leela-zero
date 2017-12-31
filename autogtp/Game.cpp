@@ -21,7 +21,7 @@
 
 Game::Game(const QString& weights, const QString& opt) :
     QProcess(),
-    m_cmdLine("./leelaz-udp"),
+    m_cmdLine("./leelaz"),
     m_timeSettings("time_settings 0 1 0"),
     m_resignation(false),
     m_blackToMove(true),
