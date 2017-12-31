@@ -79,12 +79,11 @@ def setupMemory(leename, num_instances):
 
 
 def getReadyInstanceData(smpB, shared_input, batch_size):
+    # t1 = time.perf_counter()
+
     instance_ids = []
     input_data = []
     while len(instance_ids) < batch_size:
-        # sleep a tiny fraction of second to help with CPU usage
-        time.sleep(1e-5)
-
         for instance_id, input_ready_smp in enumerate(smpB):
             # not ready to acquire
             if input_ready_smp.value <= 0:
@@ -99,18 +98,24 @@ def getReadyInstanceData(smpB, shared_input, batch_size):
             input_data.append(shared_input[start_data : end_data])
 
             if len(instance_ids) == batch_size:
-                dt = np.concatenate(input_data)
-                return instance_ids, dt
+                break
+
+        # sleep a tiny fraction of second to help with CPU usage
+        time.sleep(1e-5)
+
+    dt = np.concatenate(input_data)
+    # t2 = time.perf_counter()
+    # print("delta get_data = ", t2 - t1)
+
+    return instance_ids, dt
 
 
-def runNN(instance_ids, input_data, memout, smpA):
+def runNN(net, instance_ids, input_data, memout, smpA):
     # t1 = time.perf_counter()
 
-    nn.netlock.acquire(True)   # BLOCK NET WEIGHTS HERE
-    nn.net[0].set_value(input_data.reshape(
+    net[0].set_value(input_data.reshape(
         (len(instance_ids), INPUT_CHANNELS, BOARD_SIZE, BOARD_SIZE)))
-    qqq = nn.net[1]().astype(np.float32)
-    nn.netlock.release()       # RELEASE NET WEIGHTS HERE
+    qqq = net[1]().astype(np.float32)
 
     sss = qqq.view(dtype = np.uint8)
     for i, instance_id in enumerate(instance_ids):
@@ -144,11 +149,17 @@ def main():
 
     smp_counter.release() # now clients can take this semaphore
 
+    net = nn.setupNN(batch_size)
+    nn.startWeightUpdater(batch_size)
+
     print("Waiting for %d autogtp instances to run" % num_instances)
 
     minibatches_run = 0
     while True:
-        # t1 = time.perf_counter()
+        if nn.hasNewNet():
+            net = None
+            gc.collect()  # hope that GPU memory is freed, not sure :-()
+            net = nn.setupNN(batch_size)
 
         instance_ids, dt = getReadyInstanceData(smpB, input_mem, batch_size)
         assert len(instance_ids) == batch_size
@@ -156,12 +167,9 @@ def main():
         if minibatches_run % 1000 == 0:
             print("\tminibatch iteration ", minibatches_run)
 
-        # t2 = time.perf_counter()
-        # print("delta get_data = ", t2 - t1)
+        runNN(net, instance_ids, dt, output_mem, smpA)
 
-        # TODO try to thread this or getReadyInstanceData
-        runNN(instance_ids, dt, output_mem, smpA)
-        minibatches_processed += 1
+        minibatches_run += 1
 
 if __name__ == "__main__":
     if len(sys.argv) != 3 :
