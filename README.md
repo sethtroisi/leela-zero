@@ -1,29 +1,39 @@
+# Quick Note
+
+Hi! This is my fork of [gcp's leela-zero](https://github.com/gcp/leela-zero) project for my personal development.
+
+In particular this branch is for faster minibatching with Theano, sub-forked (is this a word?) from [NTT123's udpserver branch](https://github.com/NTT123/leela-zero/tree/udpserver)
+
+If something doesn't make sense fill an issue or PM me on Reddit @ [seth_tr](https://www.reddit.com/user/seth_tr/).
+
+I develop under Ubuntu 17.10 with python3, if something doesn't work in another environment ping me and we'll chat about fixing it.
+
 # Fast Leela Zero with Theano
 
 The idea is to run the forwarding step of neural network in a seperated process. Leela Zero then communicates with the process using posix ipc. Current implementation uses theano for the forwarding step.
 
 To start games, you first need to start the server, and then run multiple instances of autogtp (e.g., `./autogtp`).
 
-Run server with command:  
+**Run server with command:**
 
     cd ipc
     export THEANO_FLAGS='cast_policy=numpy+floatX,device=cuda0,dnn.conv.algo_fwd=time_once,floatX=float32'
     python server.py 4 2
-    
-where `4` is the number of Leelaz instances and `2` is the batch size. The number of instances must be divisible by batch size. The idea is to let GPU computes the current batch while CPUs prepare the input for the next batch.
+
+where `4` is the number of Leelaz instances and `2` is the batch size. Historically the number of instances must be divisible by batch size. The idea is to let GPU computes the current batch while CPUs prepare the input for the next batch.
 
 Theano also supports `device=cpu` option for machines without GPU.
 
-This version also supports running multiple batches in parallel. It is useful when 1 batch cannot use 100% of your GPU. 
+This version also supports running multiple batches in parallel. It is useful when 1 batch cannot use 100% of your GPU.
 We use `LEELAZ` environment variable to specify the name of shared memory and semaphores are used to communicate between process in each batch.
 For example, if you want to run two batches in parallel, for the first batch, you may run:
 
-    LEELAZ=lee1 python 4 2
+    LEELAZ=lee1 python server.py 4 2
     LEELAZ=lee1 ./autogtp -g 4
 
 and for the second patch:
 
-    LEELAZ=lee2 python 4 2
+    LEELAZ=lee2 python server.py 4 2
     LEELAZ=lee2 ./autogtp -g 4
 
 You are running 8 instances with 2 batches in parallel. Each batch has 4 instances with 2 instances running on GPU while the other two instances run on CPU to prepare the input for the next batch.
