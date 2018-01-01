@@ -1,4 +1,3 @@
-import gc
 import mmap
 import os
 import sys
@@ -7,6 +6,7 @@ import time
 import posix_ipc as ipc
 import numpy as np
 
+from nn import TheanoLZN
 import nn # import our neural network
 
 BOARD_SIZE = 19
@@ -113,11 +113,9 @@ def getReadyInstanceData(smpB, shared_input, batch_size):
 def runNN(net, instance_ids, input_data, memout, smpA):
     # t1 = time.perf_counter()
 
-    net[0].set_value(input_data.reshape(
-        (len(instance_ids), INPUT_CHANNELS, BOARD_SIZE, BOARD_SIZE)))
-    qqq = net[1]().astype(np.float32)
-
+    qqq = net.runNN(input_data)
     sss = qqq.view(dtype = np.uint8)
+
     for i, instance_id in enumerate(instance_ids):
         memout[instance_id * INSTANCE_OUTPUT_SIZE:
               (instance_id + 1) * INSTANCE_OUTPUT_SIZE] = sss[i]
@@ -149,18 +147,13 @@ def main():
 
     smp_counter.release() # now clients can take this semaphore
 
-    net = nn.setupNN(batch_size)
-    nn.startWeightUpdater(batch_size)
+    net = TheanoLZN(batch_size)
+    net.startWeightUpdater()
 
     print("Waiting for %d autogtp instances to run" % num_instances)
 
     minibatches_run = 0
     while True:
-        if nn.hasNewNet():
-            net = None
-            gc.collect()  # hope that GPU memory is freed, not sure :-()
-            net = nn.setupNN(batch_size)
-
         instance_ids, dt = getReadyInstanceData(smpB, input_mem, batch_size)
         assert len(instance_ids) == batch_size
 

@@ -1,6 +1,8 @@
 import gc
+import gzip
 import numpy as np
 import os
+import shutil
 import sys
 import threading
 import time
@@ -12,29 +14,37 @@ from theano.tensor.nnet import conv2d
 from theano.tensor.nnet import relu
 from theano.tensor.nnet.bn import batch_normalization_test as bn
 
-
-# GLOBALS
-nethash = None
-newNet = None
-
+BEST_NETWORK_HASH_URL = "http://zero.sjeng.org/best-network-hash"
+BEST_NETWORK_URL = "http://zero.sjeng.org/networks/best-network.gz"
 
 def getLatestNNHash():
-    txt = urllib.request.urlopen("http://zero.sjeng.org/best-network-hash").read().decode()
+    txt = urllib.request.urlopen(BEST_NETWORK_HASH_URL).read().decode()
     raw_net  = txt.split("\n")[0]
     return raw_net
 
 
 def downloadBestNetworkWeight(nethash):
     try:
+        # Test if network already exists
         return open(nethash).read()
     except Exception as ex:
-        os.system("curl http://zero.sjeng.org/networks/best-network.gz -o %s.gz" % nethash)
-        os.system("gzip -fd %s.gz" % nethash)
+        print("Downloading weights", nethash)
+        gzip_name = nethash + ".gz"
+        urllib.request.urlretrieve(BEST_NETWORK_URL, gzip_name)
+        print("Done!")
+        with gzip.open(gzip_name, 'rb') as f_in, open(nethash, 'wb') as f_out:
+            shutil.copyfileobj(f_in, f_out)
+        # Cleanup .gz file
+        os.remove(gzip_name)
         return open(nethash).read()
+
+
+def downloadAndParseWeights(newhash):
+    txt = downloadBestNetworkWeight(newhash)
+    return loadWeight(txt)
 
 
 def loadWeight(text):
-
     linecount = 0
 
     def testShape(s, si):
@@ -185,60 +195,67 @@ def LZN(batch_size, ws, nb, nf):
     return (x, theano.function(params, out))
 
 
-def downloadAndParseWeights(newhash):
-    print("Downloading weights", newhash)
-    txt = downloadBestNetworkWeight(newhash)
-    print("Done!")
-    return loadWeight(txt)
+class TheanoLZN():
+    def __init__(self, batch_size):
+        self.batch_size = batch_size
+        self.lock = threading.Lock()
+        self.net = None
+        self.net_hash = ""
+        self.next_weights = None
+
+        self.setupNN()
+
+    def setupNN(self):
+        if self.next_weights:
+            newhash, data = self.next_weights
+            self.next_weights = None
+        else:
+            print("\nLoading latest network")
+            newhash = getLatestNNHash()
+            print("Hash: ", newhash)
+            data = downloadAndParseWeights(newhash)
+
+        self.lock.acquire()
+
+        self.net = None
+        gc.collect()  # hope that GPU memory is freed, not sure :-()
+
+        print("\nCompling the latest neural network")
+        weights, numBlocks, numFilters = data
+        self.net = LZN(self.batch_size, weights, numBlocks, numFilters)
+        self.net_hash = newhash
+        print ("Done!")
+
+        self.lock.release()
 
 
-def setupNN(batch_size):
-    global nethash, newNet
+    def runNN(self, input_data):
+        if self.next_weights:
+            self.setupNN()
 
-    if newNet:
-        newhash, data = newNet
-    else:
-        print("\nLoading latest network")
-        newhash = getLatestNNHash()
-        print("Hash: ", nethash)
-        data = downloadAndParseWeights(newhash)
-
-    print("\nCompling the latest neural network")
-    weights, numBlocks, numFilters = data
-    net = LZN(batch_size, weights, numBlocks, numFilters)
-
-    nethash = newhash
-    newNet = None
-    print ("Done!")
-
-    return net
+        self.lock.acquire()
+        self.net[0].set_value(input_data.reshape(self.batch_size, 18, 19, 19))
+        qqq = self.net[1]().astype(np.float32)
+        self.lock.release()
+        return qqq
 
 
-def hasNewNet():
-    global newNet
-    return newNet != None
+    def startWeightUpdater(self):
+        def backgroundWeightUpdater():
+            print("\nThread watching for new weights\n")
+            while True:
+                try:
+                    if self.next_weights == None:
+                        testhash = getLatestNNHash()
+                        if testhash != self.net_hash:
+                            print("New net arrived:", testhash)
+                            new_data = downloadAndParseWeights(testhash)
+                            self.next_weights = (testhash, new_data)
 
+                except Exception as ex:
+                    print("WeightUpdaterError", ex)
+                time.sleep(20)
 
-def backgroundWeightUpdater(batch_size):
-    global nethash, newNet
-    print("\nThread for auto updating latest weights\n")
-    while True:
-        try:
-            if newNet == None:
-                newhash = getLatestNNHash()
-                if newhash != nethash:
-                    print("New net arrived: ")
-                    newNet = (newhash, downloadAndParseWeights(newhash))
-
-        except Exception as ex:
-            print("Error", ex)
-        time.sleep(20)
-
-
-def startWeightUpdater(batch_size):
-    t2 = threading.Thread(
-        name="NNWeightUpdater",
-        target=backgroundWeightUpdater,
-        args=(batch_size,))
-    t2.daemon = True
-    t2.start()
+        updaterThread = threading.Thread(target=backgroundWeightUpdater)
+        updaterThread.daemon = True
+        updaterThread.start()

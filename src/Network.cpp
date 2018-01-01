@@ -492,7 +492,7 @@ Network::Netresult Network::get_scored_moves_internal(
 #ifdef USE_IPC
     auto env_name = getenv("LEELAZ");
     std::string pname(env_name == nullptr ? "lee" : env_name);
-    
+
     char name[100];
     sprintf(name, "/%s_A_%d", pname.c_str(), myid);
     named_semaphore sem_A{open_only, name};
@@ -655,8 +655,8 @@ void Network::gather_features(GameState * state, NNPlanes & planes) {
         white_to_move.set();
     }
 
-    const auto moves = std::min<int>(state->get_movenum() + 1, INPUT_MOVES);
-    for (auto h = 0; h < moves; h++) {
+    const auto moves = std::min<size_t>(state->get_movenum() + 1, INPUT_MOVES);
+    for (auto h = size_t{0}; h < moves; h++) {
         const auto& test = state->get_boardplanes(h);
         planes[black_offset + h] = test.first;
         planes[white_offset + h] = test.second;
