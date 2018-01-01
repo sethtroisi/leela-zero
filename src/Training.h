@@ -20,10 +20,13 @@
 #define TRAINING_H_INCLUDED
 
 #include "config.h"
+
+#include <stddef.h>
 #include <string>
 #include <tuple>
 #include <utility>
 #include <vector>
+
 #include "GameState.h"
 #include "Network.h"
 #include "Random.h"
