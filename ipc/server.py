@@ -1,3 +1,5 @@
+from __future__ import print_function
+
 import mmap
 import os
 import sys
@@ -6,11 +8,16 @@ import time
 import posix_ipc as ipc
 import numpy as np
 
+
 from nn import TheanoLZN
 from stats_timer import StatsTimer
 
- # TODO make this a command line option
+# TODO make these command line options
 DISPLAY_TIMING_INFO = True
+PLAYOUTS_PER_MOVE = 1600
+MOVES_PER_GAME_AVERAGE = 350
+
+PRINT_EVERY_SECONDS = 200 # every 200 seconds ~ once per game
 
 BOARD_SIZE = 19
 BOARD_SQUARES = BOARD_SIZE ** 2
@@ -128,11 +135,16 @@ def runNN(net, instance_ids, input_data, memout, smpA, stats_timer):
 
 
 def printStats(t0, minibatches, batch_size, stat_timers):
-    print("\n\tminibatch iteration {}x{} = {} playouts".format(
-        minibatches, batch_size, minibatches * batch_size))
+    total_time_min = (time.perf_counter() - t0) / 60.0
+    playouts = minibatches * batch_size
+    moves = playouts // PLAYOUTS_PER_MOVE
+    games = moves / MOVES_PER_GAME_AVERAGE
+    print("\n\t({:.1f} minutes) minibatch iteration {}x{} = {} playouts ~= {} moves ~= {:.1f} games"
+        .format(total_time_min, minibatches, batch_size, playouts, moves, games))
+
     for stat_timer in stat_timers:
         print("\t" + stat_timer.getSummary())
-    print("\n")
+    print()
 
 
 def main():
@@ -164,9 +176,10 @@ def main():
     # set up timers for performance data
     get_data_timing = StatsTimer("collecting data")
     nn_timing = StatsTimer("running net")
+    t0 = time.perf_counter()
+    last_status = 0
 
     print("Waiting for %d autogtp instances to run" % num_instances)
-    t0 = time.perf_counter()
 
     minibatches_run = 0
     while True:
@@ -176,8 +189,13 @@ def main():
         runNN(net, instance_ids, batch_data, output_mem, smpA, nn_timing)
 
         minibatches_run += 1
-        if minibatches_run % 1000 == 1:
-            printStats(t0, minibatches_run, batch_size, [get_data_timing, nn_timing])
+
+        # Limit how often this check is performed
+        if minibatches_run % 100 == 0:
+            t = time.perf_counter()
+            if (t - last_status) > PRINT_EVERY_SECONDS:
+                last_status = t
+                printStats(t0, minibatches_run, batch_size, [get_data_timing, nn_timing])
 
 
 if __name__ == "__main__":
