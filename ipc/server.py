@@ -7,7 +7,10 @@ import posix_ipc as ipc
 import numpy as np
 
 from nn import TheanoLZN
-import nn # import our neural network
+from stats_timer import StatsTimer
+
+ # TODO make this a command line option
+DISPLAY_TIMING_INFO = True
 
 BOARD_SIZE = 19
 BOARD_SQUARES = BOARD_SIZE ** 2
@@ -78,8 +81,8 @@ def setupMemory(leename, num_instances):
     return counter, input_mem, output_mem
 
 
-def getReadyInstanceData(smpB, shared_input, batch_size):
-    # t1 = time.perf_counter()
+def getReadyInstanceData(smpB, shared_input, batch_size, stats_timer):
+    stats_timer.start()
 
     instance_ids = []
     input_data = []
@@ -103,15 +106,14 @@ def getReadyInstanceData(smpB, shared_input, batch_size):
         # sleep a tiny fraction of second to help with CPU usage
         time.sleep(1e-5)
 
-    dt = np.concatenate(input_data)
-    # t2 = time.perf_counter()
-    # print("delta get_data = ", t2 - t1)
+    data = np.concatenate(input_data)
+    stats_timer.stop()
 
-    return instance_ids, dt
+    return instance_ids, data
 
 
-def runNN(net, instance_ids, input_data, memout, smpA):
-    # t1 = time.perf_counter()
+def runNN(net, instance_ids, input_data, memout, smpA, stats_timer):
+    stats_timer.start()
 
     qqq = net.runNN(input_data)
     sss = qqq.view(dtype = np.uint8)
@@ -122,8 +124,15 @@ def runNN(net, instance_ids, input_data, memout, smpA):
 
         smpA[instance_id].release() # send result to client
 
-    # t2 = time.perf_counter()
-    # print("delta run_nn = ", t2- t1)
+    stats_timer.stop()
+
+
+def printStats(t0, minibatches, batch_size, stat_timers):
+    print("\n\tminibatch iteration {}x{} = {} playouts".format(
+        minibatches, batch_size, minibatches * batch_size))
+    for stat_timer in stat_timers:
+        print("\t" + stat_timer.getSummary())
+    print("\n")
 
 
 def main():
@@ -148,21 +157,28 @@ def main():
     smp_counter.release() # now clients can take this semaphore
 
     net = TheanoLZN(batch_size)
+
+    # start a thread to watch for new weights.
     net.startWeightUpdater()
 
+    # set up timers for performance data
+    get_data_timing = StatsTimer("collecting data")
+    nn_timing = StatsTimer("running net")
+
     print("Waiting for %d autogtp instances to run" % num_instances)
+    t0 = time.perf_counter()
 
     minibatches_run = 0
     while True:
-        instance_ids, dt = getReadyInstanceData(smpB, input_mem, batch_size)
-        assert len(instance_ids) == batch_size
+        instance_ids, batch_data = \
+            getReadyInstanceData(smpB, input_mem, batch_size, get_data_timing)
 
-        if minibatches_run % 1000 == 0:
-            print("\tminibatch iteration ", minibatches_run)
-
-        runNN(net, instance_ids, dt, output_mem, smpA)
+        runNN(net, instance_ids, batch_data, output_mem, smpA, nn_timing)
 
         minibatches_run += 1
+        if minibatches_run % 1000 == 1:
+            printStats(t0, minibatches_run, batch_size, [get_data_timing, nn_timing])
+
 
 if __name__ == "__main__":
     if len(sys.argv) != 3 :
