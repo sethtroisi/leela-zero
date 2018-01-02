@@ -27,9 +27,8 @@ SIZE_OF_INT = 4
 # prob of each move + prob of pass + eval of board position
 OUTPUT_PREDICTIONS = BOARD_SQUARES + 2
 
-INSTANCE_INPUTS       = INPUT_CHANNELS * BOARD_SQUARES
-INSTANCE_INPUT_SIZE   = SIZE_OF_FLOAT * INSTANCE_INPUTS
-INSTANCE_OUTPUT_SIZE  = SIZE_OF_FLOAT * OUTPUT_PREDICTIONS
+INSTANCE_INPUTS  = INPUT_CHANNELS * BOARD_SQUARES
+INSTANCE_OUTPUTS = OUTPUT_PREDICTIONS
 
 
 def roundup(size, page_size):
@@ -59,8 +58,8 @@ def setupMemory(leename, num_instances):
     mem_name = "/sm" + leename  # shared memory name
     # 2 counters + num_instance * (input + output)
     counter_size = 2 * SIZE_OF_INT
-    total_input_size  = num_instances * INSTANCE_INPUT_SIZE
-    total_output_size = num_instances * INSTANCE_OUTPUT_SIZE
+    total_input_size  = num_instances * INSTANCE_INPUTS * SIZE_OF_FLOAT
+    total_output_size = num_instances * INSTANCE_OUTPUTS * SIZE_OF_FLOAT
 
     needed_memory_size = counter_size + total_input_size + total_output_size
     shared_memory_size = roundup(needed_memory_size, ipc.PAGE_SIZE)
@@ -77,16 +76,18 @@ def setupMemory(leename, num_instances):
 
     # Set up aliased names for the shared memory
     mv  = np.frombuffer(mem, dtype=np.uint8, count=needed_memory_size);
-    counter    = mv[:counter_size].view(dtype=np.int32)
-    input_mem  = mv[counter_size:counter_size + total_input_size].view(dtype=np.float32)
-    output_mem = mv[counter_size + total_input_size:]
+    counter    = mv[:counter_size].view(np.int32)
+    input_mem  = mv[counter_size:counter_size + total_input_size].view(np.float32)
+    output_mem = mv[counter_size + total_input_size:].view(np.float32)
 
     # reset all shared memory
     mv[:] = 0
 
     # create views for input_mem, output_mem for each instance
-    inputs = [input_mem[i*INSTANCE_INPUT_SIZE:(i+1)*INSTANCE_INPUT_SIZE] for i in range(num_instances)]
-    outputs = [output_mem[i*INSTANCE_OUTPUT_SIZE:(i+1)*INSTANCE_OUTPUT_SIZE] for i in range(num_instances)]
+    inputs = np.split(input_mem, num_instances)
+    outputs = np.split(output_mem, num_instances)
+    assert len(inputs[0]) == INSTANCE_INPUTS
+    assert len(outputs[0]) == INSTANCE_OUTPUTS
 
     return counter, inputs, outputs
 
@@ -96,6 +97,7 @@ def getReadyInstanceData(smpB, shared_input, batch_size, stats_timer):
 
     instance_ids = []
     input_data = []
+    checks = 0
     while len(instance_ids) < batch_size:
         for instance_id, input_ready_smp in enumerate(smpB):
             # not ready to acquire
@@ -110,8 +112,12 @@ def getReadyInstanceData(smpB, shared_input, batch_size, stats_timer):
             if len(instance_ids) == batch_size:
                 break
 
-        # sleep a tiny fraction of second to help with CPU usage
-        time.sleep(1e-5)
+        checks += 1
+        if checks % 10 == 9:
+            # sleep a tiny fraction of second to help with CPU usage
+            # min sleep time is ~50us so only do this every couple of loops
+            time.sleep(1e-5)
+
 
     data = np.concatenate(input_data)
     stats_timer.stop()
@@ -119,14 +125,15 @@ def getReadyInstanceData(smpB, shared_input, batch_size, stats_timer):
     return instance_ids, data
 
 
-def runNN(net, instance_ids, input_data, memout, smpA, stats_timer):
+def runNN(net, instance_ids, input_data, output_mem, smpA, stats_timer):
     stats_timer.start()
 
-    qqq = net.runNN(input_data)
-    sss = qqq.view(dtype = np.uint8)
+    out = net.runNN(input_data)
+    assert out.shape == (len(instance_ids), INSTANCE_OUTPUTS)
 
     for i, instance_id in enumerate(instance_ids):
-        memout[instance_id] = sss[i]
+        output_mem[instance_id][:] = out[i]
+
         smpA[instance_id].release() # send result to client
 
     stats_timer.stop()
@@ -152,11 +159,7 @@ def main():
     num_instances = int(sys.argv[1])
     batch_size = int(sys.argv[2])               # real batch size
 
-    if num_instances % batch_size != 0:
-        print("Error: number of instances isn't divisible by batch size")
-        sys.exit(-1)
-    else:
-        print("%d instances using batch size %d" % (num_instances, batch_size))
+    print("%d instances using batch size %d" % (num_instances, batch_size))
 
     counter, inputs, output_mem = setupMemory(leename, num_instances)
     smp_counter, smpA, smpB = createCounters(leename, num_instances)
