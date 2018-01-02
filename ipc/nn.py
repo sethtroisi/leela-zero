@@ -9,6 +9,7 @@ import time
 from six.moves import urllib
 
 import theano
+from theano import tensor as T
 from theano.tensor.nnet import conv2d
 from theano.tensor.nnet import relu
 from theano.tensor.nnet.bn import batch_normalization_test as bn
@@ -109,7 +110,7 @@ def LZN(batch_size, ws, nb, nf):
         var0 = theano.shared(w)
         #params.append(In(var0, value=w))
 
-        bn0   = bn(inp, gamma=theano.tensor.ones(nf), beta=theano.tensor.zeros(nf), mean=mean0,
+        bn0   = bn(inp, gamma=T.ones(nf), beta=T.zeros(nf), mean=mean0,
                 var=var0, axes = 'spatial', epsilon=1.0000001e-5)
 
         return bn0
@@ -154,7 +155,7 @@ def LZN(batch_size, ws, nb, nf):
         # params.append(In(b0, value=b))
         b0 = theano.shared(b)
 
-        out = theano.tensor.dot(inp, W0) + b0
+        out = T.dot(inp, W0) + b0
         return out
 
 
@@ -190,7 +191,7 @@ def LZN(batch_size, ws, nb, nf):
     valfc1out = myfc(valrelu0, 256, 1, params, "valfc1")
     valout  = valfc1out
 
-    out = theano.tensor.concatenate( [polfcout, theano.tensor.tanh(valout)], axis=1 )
+    out = T.concatenate( [polfcout, T.tanh(valout)], axis=1 )
     return (x, theano.function(params, out))
 
 
