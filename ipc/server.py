@@ -8,7 +8,6 @@ import time
 import posix_ipc as ipc
 import numpy as np
 
-
 from nn import TheanoLZN
 from stats_timer import StatsTimer
 
@@ -85,7 +84,11 @@ def setupMemory(leename, num_instances):
     # reset all shared memory
     mv[:] = 0
 
-    return counter, input_mem, output_mem
+    # create views for input_mem, output_mem for each instance
+    inputs = [input_mem[i*INSTANCE_INPUT_SIZE:(i+1)*INSTANCE_INPUT_SIZE] for i in range(num_instances)]
+    outputs = [output_mem[i*INSTANCE_OUTPUT_SIZE:(i+1)*INSTANCE_OUTPUT_SIZE] for i in range(num_instances)]
+
+    return counter, inputs, outputs
 
 
 def getReadyInstanceData(smpB, shared_input, batch_size, stats_timer):
@@ -101,11 +104,8 @@ def getReadyInstanceData(smpB, shared_input, batch_size, stats_timer):
 
             smpB[instance_id].acquire()
 
-            start_data = instance_id * INSTANCE_INPUTS
-            end_data = start_data + INSTANCE_INPUTS
-
             instance_ids.append(instance_id)
-            input_data.append(shared_input[start_data : end_data])
+            input_data.append(shared_input[instance_id])
 
             if len(instance_ids) == batch_size:
                 break
@@ -126,9 +126,7 @@ def runNN(net, instance_ids, input_data, memout, smpA, stats_timer):
     sss = qqq.view(dtype = np.uint8)
 
     for i, instance_id in enumerate(instance_ids):
-        memout[instance_id * INSTANCE_OUTPUT_SIZE:
-              (instance_id + 1) * INSTANCE_OUTPUT_SIZE] = sss[i]
-
+        memout[instance_id] = sss[i]
         smpA[instance_id].release() # send result to client
 
     stats_timer.stop()
@@ -160,7 +158,7 @@ def main():
     else:
         print("%d instances using batch size %d" % (num_instances, batch_size))
 
-    counter, input_mem, output_mem = setupMemory(leename, num_instances)
+    counter, inputs, output_mem = setupMemory(leename, num_instances)
     smp_counter, smpA, smpB = createCounters(leename, num_instances)
 
     # set up counters as [num_instances, next available id]
@@ -169,7 +167,6 @@ def main():
     smp_counter.release() # now clients can take this semaphore
 
     net = TheanoLZN(batch_size)
-
     # start a thread to watch for new weights.
     net.startWeightUpdater()
 
@@ -184,7 +181,7 @@ def main():
     minibatches_run = 0
     while True:
         instance_ids, batch_data = \
-            getReadyInstanceData(smpB, input_mem, batch_size, get_data_timing)
+            getReadyInstanceData(smpB, inputs, batch_size, get_data_timing)
 
         runNN(net, instance_ids, batch_data, output_mem, smpA, nn_timing)
 
