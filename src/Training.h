@@ -73,7 +73,11 @@ public:
                                 const std::string& out_filename);
     static void test_supervised(const std::string& sgf_file);
 private:
-    using teststats_t = std::tuple<size_t, size_t, std::vector<double>>;
+    using teststats_t = std::tuple<int, int, std::vector<double>>;
+    using gamestats_t = std::vector<teststats_t>;
+
+    // for stage of game.
+    static constexpr size_t BUCKET_SIZE = 75;
 
     // Consider only every 1/th position in a game.
     // This ensures that positions in a chunk are from disjoint games.
@@ -88,10 +92,12 @@ private:
     static void dump_training(int winner_color,
                               OutputChunker& outchunker);
     static void dump_debug(OutputChunker& outchunker);
+
+    static void incrementStats(gamestats_t& stats, int move, bool wasProMove, float eval);
     static void test_game(GameState& state, int who_won,
                           const std::vector<int>& tree_moves,
-                          teststats_t& stats);
-    static void print_test_status(size_t gamecount, const teststats_t& stats);
+                          gamestats_t& stats);
+    static void print_test_status(size_t gamecount, const gamestats_t& stats);
 
     static std::vector<TimeStep> m_data;
     static Random m_random;

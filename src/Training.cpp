@@ -25,6 +25,7 @@
 #include <iostream>
 #include <iterator>
 #include <memory>
+#include <numeric>
 #include <sstream>
 #include <stdexcept>
 #include <utility>
@@ -323,9 +324,25 @@ void Training::dump_supervised(const std::string& sgf_name,
     std::cout << "Dumped " << train_pos << " training positions." << std::endl;
 }
 
+
+void Training::incrementStats(gamestats_t& stats, int move, bool wasProMove, float eval) {
+    // all positions
+    std::get<0>(stats[0])++;                  // positions
+    if (wasProMove) std::get<1>(stats[0])++;  // best move was top suggestion
+    std::get<2>(stats[0]).push_back(eval);    // eval (from winner's perspective)
+
+
+    // bucketed by "stage" of game
+    int stage = 1 + move / Training::BUCKET_SIZE;
+    std::get<0>(stats[stage])++;
+    if (wasProMove) std::get<1>(stats[stage])++;
+    std::get<2>(stats[stage]).push_back(eval);
+}
+
+
 void Training::test_game(GameState& state, int who_won,
                          const std::vector<int>& tree_moves,
-                         teststats_t& stats) {
+                         gamestats_t& stats) {
     clear_training();
     auto counter = size_t{0};
     state.rewind();
@@ -343,9 +360,9 @@ void Training::test_game(GameState& state, int who_won,
         auto skip = m_random.randfix<TEST_SKIP_SIZE>();
         if (skip == 0) {
             UCTNode root_node{FastBoard::PASS, 0.0f, 0.5f};
-            float eval;
             std::atomic<int> node_count{0};
-            auto success = root_node.create_children(node_count, state, eval);
+            float init_eval; // taken from the an arbirary side
+            auto success = root_node.create_children(node_count, state, init_eval);
             if (!success) {
                 std::cout << "Failed to create_children" << std::endl;
             }
@@ -353,17 +370,11 @@ void Training::test_game(GameState& state, int who_won,
             root_node.sort_root_children(to_move);
             auto* node = root_node.get_first_child();
 
-            std::get<0>(stats)++; // positions
-            if (move_vertex == node->get_move()) {
-                std::get<1>(stats)++; // best move was on top
-            }
-
-            // TODO record in top 3, top 5, top X
-
+            float eval = -100; // this will be updated when found = true
             bool found = false;
             for (const auto& node : root_node.get_children()) {
                 if (move_vertex == node->get_move()) {
-                    std::get<2>(stats).push_back(node->get_eval(who_won));
+                    eval = node->get_eval(who_won);
                     found = true;
                     break;
                 }
@@ -371,32 +382,47 @@ void Training::test_game(GameState& state, int who_won,
 
             if (!found) {
                 std::cout << "Failed to find move " << move_vertex << " in " << node_count << " children" << std::endl;
-                std::get<2>(stats).push_back(0);
+                // This is really bad, luckily it doesn't ever happen we signal in several ways
+                throw std::runtime_error("Illegal SGF move");
             }
+
+            // TODO record in top 3, top 5, top X
+            bool wasBestMove = move_vertex == node->get_move();
+            incrementStats(stats, counter, wasBestMove, eval);
         }
         counter++;
     } while (state.forward_move() && counter < tree_moves.size());
 }
 
-void Training::print_test_status(size_t gamecount, const teststats_t& stats) {
-    // TODO consider also adding log loss.
-    auto mse = double{0};
-    for (auto eval : std::get<2>(stats)) {
+void Training::print_test_status(size_t gamecount, const gamestats_t& gamestats) {
+    printf("%6lu,", gamecount);
+
+    int i = 0;
+    for (const auto& stats : gamestats) {
+        // TODO consider also adding log loss.
+
         // "The MSE is between the actual outcome Z in {-1, 1} and the network value scaled by a factor of 1/4 to the range of 0-1."
         // I'm interpretting that as both ranges were unified to 0-1 (0 black win?, 1 white win?)
+        double mse = 0;
+        for (double eval : std::get<2>(stats)) {
+            mse += (1 - eval) * (1 - eval); // eval is taken from winner's perspective
+        }
+        mse /= std::get<2>(stats).size();
 
-        // eval is taken from the game winner's perspective
-        mse += (1 - eval) * (1 - eval);
+        const auto positions = std::get<0>(stats);
+        const auto correct   = std::get<1>(stats);
+        // printf("tested positions %lu, predicted %lu/%lu = %.1f%%, MSE result: %.3f\n",
+        //        positions, correct, positions, 100.0 * correct/positions, mse);
+
+        const auto bucket_start = i * BUCKET_SIZE;
+        if (positions == 0) {
+            printf(" %lu,0,,,", bucket_start);
+        } else {
+            printf(" %lu,%d,%.3f,%.3f,", bucket_start, positions, 1.0 * correct / positions, mse);
+        }
+        i++;
     }
-    mse /= std::get<2>(stats).size();
-
-    auto positions = std::get<0>(stats);
-    auto correct = std::get<1>(stats);
-    //auto sum_win = std::get<2>(stats);
-    printf("Game %6lu, tested positions %lu, predicted %lu/%lu = %.1f%%, MSE result: %.3f\n",
-           gamecount, positions, correct, positions,
-           100.0 * correct/positions,
-           mse);
+    printf("\n");
 }
 
 void Training::test_supervised(const std::string& sgf_name) {
@@ -407,7 +433,9 @@ void Training::test_supervised(const std::string& sgf_name) {
     auto games = SGFParser::chop_all(sgf_name);
     std::cout << "Total games in file: " << games.size() << std::endl;
 
-    auto stats = teststats_t{};
+    // stats with 8 buckets = 8 * 75
+    auto stats = gamestats_t(8);
+    int valid_games = 0;
     for (auto gamecount = size_t{0}; gamecount < games.size(); gamecount++) {
         auto sgftree = SGFTree();
         try {
@@ -415,10 +443,6 @@ void Training::test_supervised(const std::string& sgf_name) {
         } catch (...) {
             continue;
         };
-
-        if (std::get<0>(stats) && gamecount % 500 == 0) {
-            print_test_status(gamecount, stats);
-        }
 
         auto tree_moves = sgftree.get_mainline();
         // Empty game or couldn't be parsed?
@@ -438,8 +462,14 @@ void Training::test_supervised(const std::string& sgf_name) {
             continue;
         }
 
+        valid_games++;
         test_game(state, who_won, tree_moves, stats);
+
+        if (valid_games % 500 == 0) {
+            print_test_status(valid_games, stats);
+        }
+
     }
-    print_test_status(games.size(), stats);
+    print_test_status(valid_games, stats);
 }
 

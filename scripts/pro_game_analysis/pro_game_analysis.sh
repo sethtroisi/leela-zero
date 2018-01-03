@@ -92,10 +92,11 @@ if [ ! -z "$ANALYSIS" ]; then
             return
         fi
 
-        results=`echo "test_supervised $SGF_TO_TEST" |
-            "$TMP_DIR/leelaz" -q -t1 -s123 -w "$NETWORK_DIR/$net" |
-            tail -n4 | head -n1 |
-            sed 's#[^,]*[/ ]\([a-f0-9.%]*\)\(,\|$\)#\1,#g'`
+        command="echo \"test_supervised $SGF_TO_TEST\" | \"$TMP_DIR/leelaz\" -q -t1 -s123 -w \"$NETWORK_DIR/$net\" | tail -n4 | head -n1"
+        #echo "$command"
+        results=`sh -c "$command"`
+        # historically used for removing % and text.
+        #    sed 's#[^,]*[/ ]\([a-f0-9.%]*\)\(,\|$\)#\1,#g'`
         echo "$1, $results"
     }
 
