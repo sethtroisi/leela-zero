@@ -114,6 +114,24 @@ source and remove the line that says "#define USE_OPENCL".
     # Download and extract <https://sjeng.org/zero/best_v1.txt.zip> to msvc/x64/Release
     # msvc/x64/Release/leela-zero --weights weights.txt
 
+## Example of compiling and running - CMake (macOS/Ubuntu)
+
+    # Clone github repo
+    git clone https://github.com/gcp/leela-zero
+    cd leela-zero
+    git submodule update --init --recursive
+
+    # Use stand alone directory to keep source dir clean
+    mkdir build && cd build
+    cmake ..
+    make leelaz
+    make tests
+    ./tests
+    curl -O https://sjeng.org/zero/best_v1.txt.zip
+    unzip best_v1.txt.zip
+    ./leelaz --weights weights.txt
+
+
 # Usage
 
 The engine supports the GTP protocol, version 2, specified at: https://www.lysator.liu.se/~gunnar/gtp/gtp2-spec-draft2/gtp2-spec.html
@@ -270,6 +288,8 @@ done with multiple processes each bound to a GPU)
 http://zero.sjeng.org
 * Watch Leela Zero's training games live in a GUI:
 https://github.com/fsparv/LeelaWatcher
+* Stockfish chess engine ported to Leela Zero framework:
+https://github.com/glinscott/leela-chess
 
 # License
 

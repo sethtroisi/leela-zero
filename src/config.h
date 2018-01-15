@@ -18,81 +18,91 @@
 #ifndef CONFIG_INCLUDED
 #define CONFIG_INCLUDED
 
-/*  Timing code. Define one or none of:
- *
- *  GETTICKCOUNT, GETTIMEOFDAY
+/*
+ * We need to check for input while we are thinking.
+ * That code isn't portable, so select something appropriate for the system.
  */
 #ifdef _WIN32
-#define GETTICKCOUNT
 #undef HAVE_SELECT
 #define NOMINMAX
 #else
 #define HAVE_SELECT
-#define GETTIMEOFDAY
 #endif
+
+/*
+ * Features
+ *
+ * USE_BLAS: Use a basic linear algebra library.
+ * We currently require this, as not all operations are performed on
+ * the GPU - some operations won't get any speedup from it.
+ * Also used for OpenCL self-checks.
+ */
+#define USE_BLAS
+/*
+ * We use OpenBLAS by default, except on macOS, which has a fast BLAS
+ * built-in. (Accelerate)
+ */
+#if !defined(__APPLE__) && !defined(__MACOSX)
+#define USE_OPENBLAS
+#endif
+/*
+ * USE_MKL: Optionally allows using Intel Math Kernel library as
+ * BLAS implementation. Note that MKL's license is not compatible with the GPL,
+ * so do not redistribute the resulting binaries. It is fine to use it on your
+ * own system.
+ */
+//# define USE_MKL
+/*
+ * USE_OPENCL: Use OpenCL acceleration for GPUs. This makes the program a lot
+ * faster if you have a recent GPU. Don't use it on CPUs even if they have
+ * OpenCL drivers - the BLAS version is much faster for those.
+ */
+#define USE_OPENCL
+/*
+ * USE_HALF: Use 16-bit floating point storage for network parameters.
+ * Only works for OpenCL implementations. Gives a slight speedup on some
+ * cards at the cost of some accuracy.
+ */
+// #define USE_HALF
+/*
+ * USE_TUNER: Expose some extra command line parameters that allow tuning the
+ * search algorithm.
+ */
+// #define USE_TUNER
 
 /* Features */
-//#define USE_BLAS
-//#define USE_OPENBLAS
-//#define USE_MKL
-//#define USE_OPENCL
-//#define USE_TUNER
 #define USE_IPC
-// Remember to turn on USE_OPENCL, USE_BLAS, and USE_OPENBLAS (for Linux only) when using USE_IPC_TEST
-//#define USE_IPC_TEST
+#define USE_IPC_TEST
+
+// TODO readd #errorwarning about USE_OPEN_CL if USE_IPC_TEST
+
 
 #define PROGRAM_NAME "Leela Zero"
-#define PROGRAM_VERSION "0.9"
+#define PROGRAM_VERSION "0.10.1"
 
-// OpenBLAS limitation
-// #if defined(USE_BLAS) && defined(USE_OPENBLAS)
-// #define MAX_CPUS 64
-// #else
-// #define MAX_CPUS 128
-// #endif
-
-#define MAX_CPUS 1
-
-/* Integer types */
-
-typedef int int32;
-typedef short int16;
-typedef signed char int8;
-typedef unsigned int uint32;
-typedef unsigned short uint16;
-typedef unsigned char uint8;
-
-/* Data type definitions */
-
-#ifdef _WIN32
-typedef __int64 int64 ;
-typedef unsigned __int64 uint64;
+/*
+ * OpenBLAS limitation: the default configuration on some Linuxes
+ * is limited to 64 cores.
+ */
+#if defined(USE_BLAS) && defined(USE_OPENBLAS)
+#define MAX_CPUS 64
 #else
-typedef long long int int64 ;
-typedef  unsigned long long int uint64;
+#define MAX_CPUS 128
 #endif
 
-#ifdef USE_HALF
-#include "half/half.hpp"
-using net_t = half_float::half;
-#else
+// Removed half support from this branch fast GPU bandwidth or bust
 using net_t = float;
+
+// TODO turn this into #error
+#if defined(USE_BLAS) && defined(USE_OPENCL) && !defined(USE_HALF)
+// If both BLAS and OpenCL are fully usable, then check the OpenCL
+// results against BLAS with some probability.
+#define USE_OPENCL_SELFCHECK
+#define SELFCHECK_PROBABILITY 2000
 #endif
 
 #if (_MSC_VER >= 1400) /* VC8+ Disable all deprecation warnings */
     #pragma warning(disable : 4996)
 #endif /* VC8+ */
-
-#ifdef GETTICKCOUNT
-    typedef int rtime_t;
-#else
-    #if defined(GETTIMEOFDAY)
-        #include <sys/time.h>
-        #include <time.h>
-        typedef struct timeval rtime_t;
-    #else
-        typedef time_t rtime_t;
-    #endif
-#endif
 
 #endif

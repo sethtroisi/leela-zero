@@ -42,6 +42,7 @@ using namespace Utils;
 UCTSearch::UCTSearch(GameState & g)
     : m_rootstate(g) {
     set_playout_limit(cfg_max_playouts);
+    set_visit_limit(cfg_max_visits);
 }
 
 SearchResult UCTSearch::play_simulation(GameState & currstate, UCTNode* const node) {
@@ -51,7 +52,7 @@ SearchResult UCTSearch::play_simulation(GameState & currstate, UCTNode* const no
 
     auto result = SearchResult{};
 
-    TTable::get_TT()->sync(hash, komi, node);
+    TTable::get_TT().sync(hash, komi, node);
     node->virtual_loss();
 
     if (!node->has_children()) {
@@ -95,7 +96,7 @@ SearchResult UCTSearch::play_simulation(GameState & currstate, UCTNode* const no
         node->update(result.eval());
     }
     node->virtual_loss_undo();
-    TTable::get_TT()->update(hash, komi, node);
+    TTable::get_TT().update(hash, komi, node);
 
     return result;
 }
@@ -108,7 +109,7 @@ void UCTSearch::dump_stats(KoState & state, UCTNode & parent) {
     const int color = state.get_to_move();
 
     // sort children, put best move on top
-    m_root.sort_root_children(color);
+    parent.sort_children(color);
 
 
     if (parent.get_first_child()->first_visit()) {
@@ -117,6 +118,8 @@ void UCTSearch::dump_stats(KoState & state, UCTNode & parent) {
 
     int movecount = 0;
     for (const auto& node : parent.get_children()) {
+        // Always display at least two moves. In the case there is
+        // only one move searched the user could get an idea why.
         if (++movecount > 2 && !node->get_visits()) break;
 
         std::string tmp = state.move_to_text(node->get_move());
@@ -125,7 +128,7 @@ void UCTSearch::dump_stats(KoState & state, UCTNode & parent) {
         myprintf("%4s -> %7d (V: %5.2f%%) (N: %5.2f%%) PV: ",
             tmp.c_str(),
             node->get_visits(),
-            node->get_visits() > 0 ? node->get_eval(color)*100.0f : 0.0f,
+            node->get_eval(color)*100.0f,
             node->get_score() * 100.0f);
 
         KoState tmpstate = state;
@@ -141,7 +144,7 @@ int UCTSearch::get_best_move(passflag_t passflag) {
     int color = m_rootstate.board.get_to_move();
 
     // Make sure best is first
-    m_root.sort_root_children(color);
+    m_root.sort_children(color);
 
     // Check whether to randomize the best move proportional
     // to the playout counts, early game only.
@@ -266,6 +269,9 @@ std::string UCTSearch::get_pv(KoState & state, UCTNode& parent) {
     }
 
     auto& best_child = parent.get_best_root_child(state.get_to_move());
+    if (best_child.first_visit()) {
+        return std::string();
+    }
     auto best_move = best_child.get_move();
     auto res = state.move_to_text(best_move);
 
@@ -296,8 +302,8 @@ bool UCTSearch::is_running() const {
     return m_run;
 }
 
-bool UCTSearch::playout_limit_reached() const {
-    return m_playouts >= m_maxplayouts;
+bool UCTSearch::playout_or_visit_limit_reached() const {
+    return m_playouts >= m_maxplayouts || m_root.get_visits() >= m_maxvisits;
 }
 
 void UCTWorker::operator()() {
@@ -307,7 +313,7 @@ void UCTWorker::operator()() {
         if (result.valid()) {
             m_search->increment_playouts();
         }
-    } while(m_search->is_running() && !m_search->playout_limit_reached());
+    } while(m_search->is_running() && !m_search->playout_or_visit_limit_reached());
 }
 
 void UCTSearch::increment_playouts() {
@@ -372,7 +378,7 @@ int UCTSearch::think(int color, passflag_t passflag) {
         }
         keeprunning  = is_running();
         keeprunning &= (elapsed_centis < time_for_move);
-        keeprunning &= !playout_limit_reached();
+        keeprunning &= !playout_or_visit_limit_reached();
     } while(keeprunning);
 
     // stop the search
@@ -391,7 +397,7 @@ int UCTSearch::think(int color, passflag_t passflag) {
 
     Time elapsed;
     int elapsed_centis = Time::timediff_centis(start, elapsed);
-    if (elapsed_centis > 0) {
+    if (elapsed_centis+1 > 0) {
         myprintf("%d visits, %d nodes, %d playouts, %d n/s\n\n",
                  m_root.get_visits(),
                  static_cast<int>(m_nodes),
@@ -438,5 +444,16 @@ void UCTSearch::set_playout_limit(int playouts) {
         m_maxplayouts = std::numeric_limits<decltype(m_maxplayouts)>::max();
     } else {
         m_maxplayouts = playouts;
+    }
+}
+
+void UCTSearch::set_visit_limit(int visits) {
+    static_assert(std::is_convertible<decltype(visits),
+                                      decltype(m_maxvisits)>::value,
+                  "Inconsistent types for visits amount.");
+    if (visits == 0) {
+        m_maxvisits = std::numeric_limits<decltype(m_maxvisits)>::max();
+    } else {
+        m_maxvisits = visits;
     }
 }

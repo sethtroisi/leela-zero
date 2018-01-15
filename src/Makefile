@@ -29,6 +29,8 @@ ifeq ($(THE_OS),Linux)
 	CXXFLAGS += -I/usr/include/openblas
 	DYNAMIC_LIBS += -lopenblas
 	DYNAMIC_LIBS += -lOpenCL
+	DYNAMIC_LIBS += -lrt
+
 endif
 ifeq ($(THE_OS),Darwin)
 # for macOS (comment out the Linux part)
@@ -49,7 +51,7 @@ sources = Network.cpp FullBoard.cpp KoState.cpp Training.cpp \
 	  TimeControl.cpp UCTSearch.cpp GameState.cpp Leela.cpp \
 	  SGFParser.cpp Timing.cpp Utils.cpp FastBoard.cpp \
 	  SGFTree.cpp Zobrist.cpp FastState.cpp GTP.cpp Random.cpp \
-	  UCTNode.cpp OpenCL.cpp TTable.cpp NNCache.cpp
+	  SMP.cpp UCTNode.cpp OpenCL.cpp TTable.cpp NNCache.cpp
 
 objects = $(sources:.cpp=.o)
 deps = $(sources:%.cpp=%.d)

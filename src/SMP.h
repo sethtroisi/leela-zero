@@ -16,40 +16,37 @@
     along with Leela Zero.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#ifndef UTILS_H_DEFINED
-#define UTILS_H_DEFINED
+#ifndef SMP_H_INCLUDED
+#define SMP_H_INCLUDED
 
 #include "config.h"
 
 #include <atomic>
-#include <limits>
-#include <string>
 
-#include "ThreadPool.h"
+namespace SMP {
+    int get_num_cpus();
 
-extern Utils::ThreadPool thread_pool;
+    class Mutex {
+    public:
+        Mutex();
+        ~Mutex() = default;
+        friend class Lock;
+    private:
+        std::atomic<bool> m_lock;
+    };
 
-namespace Utils {
-    void myprintf(const char *fmt, ...);
-    void gtp_printf(int id, const char *fmt, ...);
-    void gtp_fail_printf(int id, const char *fmt, ...);
-    void log_input(const std::string& input);
-    bool input_pending();
-
-    template<class T>
-    void atomic_add(std::atomic<T> &f, T d) {
-        T old = f.load();
-        while (!f.compare_exchange_weak(old, old + d));
-    }
-
-    template<typename T>
-    T rotl(const T x, const int k) {
-	    return (x << k) | (x >> (std::numeric_limits<T>::digits - k));
-    }
-
-    inline bool is7bit(int c) {
-        return c >= 0 && c <= 127;
-    }
+    class Lock {
+    public:
+        explicit Lock(Mutex & m);
+        ~Lock();
+        void lock();
+        void unlock();
+    private:
+        Mutex * m_mutex;
+    };
 }
+
+// Avoids accidentally creating a temporary
+#define LOCK(mutex, lock) SMP::Lock lock((mutex))
 
 #endif
