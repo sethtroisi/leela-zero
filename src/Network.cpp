@@ -101,15 +101,17 @@ static std::array<float, 1> ip2_val_b;
 #endif
 
 using namespace boost::interprocess;
+shared_memory_object sh_mem;
+mapped_region region;
 int* int_mem;
-float* metadata_mem;
+int* metadata_mem;
 float* input_mem;
 float* result_mem;
+std::unique_ptr<named_semaphore> input_ready_sem;
+std::unique_ptr<named_semaphore> output_ready_sem;
 
-shared_memory_object shmem; // {open_only, "smlee", read_write};
-mapped_region region; // {shmem, read_write};
-unsigned char * mem;// = static_cast<unsigned char*>(region.get_address());
-int myid;
+
+int instance_id;
 
 // Rotation helper
 static std::array<std::array<int, 361>, 8> rotate_nn_idx_table;
@@ -149,42 +151,54 @@ void Network::initialize(void) {
     auto env_name = getenv("LEELAZ");
     std::string pname(env_name == nullptr ? "lee" : env_name);
     std::string shared_mem_name = "sm_" + pname;
-
-    shmem= shared_memory_object(open_only, shared_mem_name.c_str(), read_write);
-    region = mapped_region(shmem, read_write);
+    sh_mem = shared_memory_object(open_only, shared_mem_name.c_str(), read_write);
+    region = mapped_region(sh_mem, read_write);
 
     offset_t size;
-    shmem.get_size(size);
-    myprintf("size %d\n", size);
-
-    { // Get instance id
+    sh_mem.get_size(size);
+    myprintf("Shared memory %d bytes\n", size);
+    { // get instance id
         int_mem = static_cast<int*>(region.get_address());
         std::string semaphore_name = pname + "_id_sem";
         named_semaphore id_sem{open_only, semaphore_name.c_str()};
         id_sem.wait();
 
-        myid = int_mem[0];
-        int_mem[0]++;
         auto num_instances = int_mem[0];
+        instance_id = int_mem[1];
+        int_mem[1]++;
 
         id_sem.post();
-        myprintf("My ID is %d / %d\n", myid, num_instances);
-        assert(0 <= myid && myid < num_instances);
+        myprintf("Client Id is %d / %d\n", instance_id, num_instances);
+        assert(0 <= instance_id && instance_id < num_instances);
     }
-
-    { // Set input_mem / result_mem pointers
+    { // setup input_mem / result_mem pointers
         float* float_mem = static_cast<float*>(region.get_address());
+
         // initial 10 (DEBUG_SIZE) entries
         // each instance is 3 + INPUTS (18*19*19) + OUTPUTS (19*19+2)
-        int instance_size = 18*19*19 + 19*19+2;
-        float_mem += 10 + myid * instance_size;
-        metadata_mem =  float_mem;
+        int instance_size = 3 + 18*19*19 + 19*19+2;
+        float_mem += 10 + instance_id * instance_size;
+
+        metadata_mem = reinterpret_cast<int*>(float_mem);
         // 3 metadata fields
         float_mem += 3;
         input_mem = float_mem;
         float_mem += 18*19*19;
         result_mem = float_mem;
+
     }
+    { // setup io ready semaphores
+        auto input_ready_name = pname + "_input_ready";
+        input_ready_sem = std::make_unique<named_semaphore>(
+            open_only, input_ready_name.c_str());
+        auto output_ready_name =
+            pname + "_output_" + std::to_string(instance_id) + "_ready";
+        output_ready_sem = std::make_unique<named_semaphore>(
+            open_only, output_ready_name.c_str());
+
+    }
+    myprintf("IPC setup complete\n");
+    // TODO set hash in metadata_mem
 #endif
 
     // Prepare rotation table
@@ -520,16 +534,18 @@ T relative_difference(T a, T b) {
 }
 
 // TODO add a parameter indicating what is data and what is ref
-void compare_net_outputs(std::vector<float>& data,
+void compare_net_outputs(std::string error_location,
+                         std::vector<float>& data,
                          std::vector<float>& ref) {
     // We accept an error up to 5%, but output values
     // smaller than 1/1000th are "rounded up" for the comparison.
     constexpr float relative_error = 5e-2f;
+
     for (auto idx = size_t{0}; idx < data.size(); ++idx) {
         auto err = relative_difference(data[idx], ref[idx]);
         if (err > relative_error) {
-            printf("Error in OpenCL calculation: expected %f got %f "
-                   "(error=%f%%)\n", ref[idx], data[idx], err * 100.0);
+            printf("Error in %s calculation, expected %f got %f (error=%f%%)\n",
+                   error_location.c_str(), ref[idx], data[idx], err * 100.0);
             printf("Update your GPU drivers or reduce the amount of games "
                    "played simultaneously.\n");
             throw std::runtime_error("OpenCL self-check mismatch.");
@@ -624,33 +640,30 @@ Network::Netresult Network::get_scored_moves_internal(
     float winrate_sig;
 
 #ifdef USE_IPC
-    auto env_name = getenv("LEELAZ");
-    std::string pname(env_name == nullptr ? "lee" : env_name);
-
-    char name[100];
-    sprintf(name, "%s_A_%d", pname.c_str(), myid);
-    named_semaphore sem_A{open_only, name};
-
-    sprintf(name, "%s_B_%d", pname.c_str(), myid);
-    named_semaphore sem_B{open_only, name};
-
-    float * my_input_data = reinterpret_cast<float *>(input_mem);
-    assert(sizeof(input_data[0]) == sizeof(float));
-    std::memcpy(input_data.data(),
-                my_input_data,
+    std::memcpy(input_mem,
+                input_data.data(),
                 input_data.size() * sizeof(float));
 
-    sem_B.post();
-    sem_A.wait();
-    float * myout = reinterpret_cast<float *>(result_mem);
+    // hash, input_ready, output_ready
+    assert(metadata_mem[1] == 0);
+    assert(metadata_mem[2] == 0);
 
-    // TODO rename these away from "my"
-    std::vector<float> my_policy_out(myout, myout + 19*19+1);
+    // indicate input_data is set in shared_mem
+    metadata_mem[1] = 1;
+    input_ready_sem->post();
 
-    softmax(my_policy_out, softmax_data, cfg_softmax_temp);
+    // Wait for results to be ready
+    output_ready_sem->wait();
+    assert(metadata_mem[1] == 0);
+    assert(metadata_mem[2] == 1);
 
-    float my_winrate_sig = (1.0f + myout[19*19+1]) / 2.0f;
-    winrate_sig = my_winrate_sig;
+    std::vector<float> ipc_policy_out(result_mem, result_mem + 19*19+1);
+
+    softmax(ipc_policy_out, softmax_data, cfg_softmax_temp);
+
+    float ipc_winrate_sig = (1.0f + result_mem[19*19+1]) / 2.0f;
+    winrate_sig = ipc_winrate_sig;
+    metadata_mem[2] = 0;
 
     #if defined(USE_IPC_TEST) && !defined(USE_OPENCL)
         #error "Must turn on USE_OPENCL when using USE_IPC_TEST"
@@ -669,7 +682,7 @@ Network::Netresult Network::get_scored_moves_internal(
     if (Random::get_Rng().randfix<SELFCHECK_PROBABILITY>() == 0) {
         auto cpu_output_data = std::vector<float>(output_data.size());
         forward_cpu(input_data, cpu_output_data);
-        compare_net_outputs(output_data, cpu_output_data);
+        compare_net_outputs("OpenCL", output_data, cpu_output_data);
     }
 #endif
     // We calculate both network heads on the CPU. They are irregular
@@ -693,11 +706,13 @@ Network::Netresult Network::get_scored_moves_internal(
     winrate_sig = (1.0f + std::tanh(winrate_out[0])) / 2.0f;
 
     // BEGIN TESTING HERE
-    #ifdef USE_IPC_TEST
-    compare_net_outputs(my_policy_out, policy_out);
+    #ifdef USE_IPC_SELFCHECK
+    if (Random::get_Rng().randfix<SELFCHECK_PROBABILITY>() == 0) {
+        compare_net_outputs("IPC policy", ipc_policy_out, policy_out);
 
-    if (fabs(winrate_sig - my_winrate_sig) > 1e-5) {
-        printf("ERR delta winrate %f\n", fabs(winrate_sig - my_winrate_sig));
+        std::vector<float> ipc_winrate(ipc_winrate_sig, 1);
+        std::vector<float> winrate(winrate_sig, 1);
+        compare_net_outputs("IPC winrate", ipc_winrate, winrate);
     }
     #endif
     // END TESTING HERE

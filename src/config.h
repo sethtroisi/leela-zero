@@ -57,7 +57,7 @@
  * faster if you have a recent GPU. Don't use it on CPUs even if they have
  * OpenCL drivers - the BLAS version is much faster for those.
  */
-#define USE_OPENCL
+//#define USE_OPENCL
 /*
  * USE_HALF: Use 16-bit floating point storage for network parameters.
  * Only works for OpenCL implementations. Gives a slight speedup on some
@@ -72,7 +72,7 @@
 
 /* Features */
 #define USE_IPC
-#define USE_IPC_TEST
+#define USE_IPC_SELFCHECK
 
 // TODO readd #errorwarning about USE_OPEN_CL if USE_IPC_TEST
 
@@ -97,7 +97,7 @@ using net_t = float;
 #if defined(USE_BLAS) && defined(USE_OPENCL) && !defined(USE_HALF)
 // If both BLAS and OpenCL are fully usable, then check the OpenCL
 // results against BLAS with some probability.
-#define USE_OPENCL_SELFCHECK
+//#define USE_OPENCL_SELFCHECK
 #define SELFCHECK_PROBABILITY 2000
 #endif
 
