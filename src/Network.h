@@ -20,16 +20,19 @@
 #define NETWORK_H_INCLUDED
 
 #include "config.h"
-
-#include <array>
+#include <vector>
+#include <string>
 #include <bitset>
 #include <memory>
-#include <string>
-#include <utility>
-#include <vector>
+#include <array>
+
+#ifdef USE_OPENCL
+#include <atomic>
+class UCTNode;
+#endif
 
 #include "FastState.h"
-#include "GameState.h"
+class GameState;
 
 class Network {
 public:
@@ -43,30 +46,25 @@ public:
 
     static Netresult get_scored_moves(GameState * state,
                                       Ensemble ensemble,
-                                      int rotation = -1,
-                                      bool skip_cache = false);
+                                      int rotation = -1);
     // File format version
-    static constexpr int FORMAT_VERSION = 1;
-    static constexpr int INPUT_CHANNELS = 18;
+    static constexpr auto FORMAT_VERSION = 1;
+    static constexpr auto INPUT_MOVES = 8;
+    static constexpr auto INPUT_CHANNELS = 2 * INPUT_MOVES + 2;
 
     static void initialize();
     static void benchmark(GameState * state, int iterations = 1600);
-    static void show_heatmap(FastState * state, Netresult & netres,
-                             bool topmoves);
+    static void show_heatmap(FastState * state, Netresult & netres, bool topmoves);
     static void softmax(const std::vector<float>& input,
                         std::vector<float>& output,
                         float temperature = 1.0f);
     static void gather_features(GameState* state, NNPlanes & planes);
+    static void gather_features2(GameState* state, NNPlanes & planes);
 
 private:
-    static void process_bn_var(std::vector<float>& weights, const float epsilon=1e-5f);
     static Netresult get_scored_moves_internal(
       GameState * state, NNPlanes & planes, int rotation);
-    static int rotate_nn_idx(const int vertex, int symmetry);
-#if defined(USE_BLAS)
-    static void forward_cpu(std::vector<float>& input,
-                            std::vector<float>& output);
-#endif
+    static int rotate_nn_idx(int x, int y, int symmetry);
 };
 
 #endif
