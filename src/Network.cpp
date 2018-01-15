@@ -101,10 +101,10 @@ static std::array<float, 1> ip2_val_b;
 #endif
 
 using namespace boost::interprocess;
-int batch_size;
-int * counter_mem;
-unsigned char * input_mem;
-unsigned char * output_mem;
+int* int_mem;
+float* metadata_mem;
+float* input_mem;
+float* result_mem;
 
 shared_memory_object shmem; // {open_only, "smlee", read_write};
 mapped_region region; // {shmem, read_write};
@@ -153,31 +153,38 @@ void Network::initialize(void) {
     shmem= shared_memory_object(open_only, shared_mem_name.c_str(), read_write);
     region = mapped_region(shmem, read_write);
 
-    mem = static_cast<unsigned char*>(region.get_address());
-    counter_mem = static_cast<int*>(region.get_address());
-
     offset_t size;
     shmem.get_size(size);
     myprintf("size %d\n", size);
 
-    std::string semaphore_name = "" + pname + "_counter";
-    named_semaphore sem_counter{open_only, semaphore_name.c_str()};
-    sem_counter.wait();
+    { // Get instance id
+        int_mem = static_cast<int*>(region.get_address());
+        std::string semaphore_name = pname + "_id_sem";
+        named_semaphore id_sem{open_only, semaphore_name.c_str()};
+        id_sem.wait();
 
-    batch_size = counter_mem[0];
-    myid = counter_mem[1];
-    counter_mem[1]++;
+        myid = int_mem[0];
+        int_mem[0]++;
+        auto num_instances = int_mem[0];
 
-    sem_counter.post();
+        id_sem.post();
+        myprintf("My ID is %d / %d\n", myid, num_instances);
+        assert(0 <= myid && myid < num_instances);
+    }
 
-    myprintf("batch size: %d\n", batch_size);
-    myprintf("My ID is %d\n", myid);
-    assert(0 <= myid && myid < batch_size);
-    assert(1 <= batch_size && batch_size <= 512);
-
-    input_mem =  mem + 4 * (2 + myid*18*19*19);
-    output_mem = mem + 4 * (2 + batch_size*18*19*19 + myid * (19*19+2));
-
+    { // Set input_mem / result_mem pointers
+        float* float_mem = static_cast<float*>(region.get_address());
+        // initial 10 (DEBUG_SIZE) entries
+        // each instance is 3 + INPUTS (18*19*19) + OUTPUTS (19*19+2)
+        int instance_size = 18*19*19 + 19*19+2;
+        float_mem += 10 + myid * instance_size;
+        metadata_mem =  float_mem;
+        // 3 metadata fields
+        float_mem += 3;
+        input_mem = float_mem;
+        float_mem += 18*19*19;
+        result_mem = float_mem;
+    }
 #endif
 
     // Prepare rotation table
@@ -635,7 +642,7 @@ Network::Netresult Network::get_scored_moves_internal(
 
     sem_B.post();
     sem_A.wait();
-    float * myout = reinterpret_cast<float *>(output_mem);
+    float * myout = reinterpret_cast<float *>(result_mem);
 
     // TODO rename these away from "my"
     std::vector<float> my_policy_out(myout, myout + 19*19+1);
