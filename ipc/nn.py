@@ -15,7 +15,7 @@ from theano.tensor.nnet import relu
 from theano.tensor.nnet.bn import batch_normalization_test as bn
 
 BEST_NETWORK_HASH_URL = "http://zero.sjeng.org/best-network-hash"
-BEST_NETWORK_URL = "http://zero.sjeng.org/networks/best-network.gz"
+BEST_NETWORK_URL = "http://zero.sjeng.org/networks/"
 
 def getLatestNNHash():
     txt = urllib.request.urlopen(BEST_NETWORK_HASH_URL).read().decode()
@@ -28,9 +28,9 @@ def downloadBestNetworkWeight(nethash):
         # Test if network already exists
         return open(nethash).read()
     except Exception as ex:
-        print("Downloading weights", nethash)
+        print("Downloading ", nethash)
         gzip_name = nethash + ".gz"
-        urllib.request.urlretrieve(BEST_NETWORK_URL, gzip_name)
+        urllib.request.urlretrieve(BEST_NETWORK_URL + gzip_name, gzip_name)
         print("Done!")
         with gzip.open(gzip_name, 'rb') as f_in, open(nethash, 'wb') as f_out:
             shutil.copyfileobj(f_in, f_out)
