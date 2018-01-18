@@ -78,7 +78,7 @@ static std::vector<std::vector<float>> batchnorm_means;
 static std::vector<std::vector<float>> batchnorm_stddivs;
 
 // Policy head
-#if !defined(USE_IPC) || defined(USE_IPC_TEST)
+#if !defined(USE_IPC) || defined(USE_IPC_SELFCHECK)
 static std::vector<float> conv_pol_w;
 static std::vector<float> conv_pol_b;
 static std::array<float, 2> bn_pol_w1;
@@ -259,6 +259,7 @@ void Network::initialize(void) {
     myprintf("Transferring weights to GPU...");
 #endif
 
+#if !defined(USE_IPC) || defined(USE_IPC_SELFCHECK)
     // Re-read file and process
     wtfile.clear();
     wtfile.seekg(0, std::ios::beg);
@@ -321,6 +322,7 @@ void Network::initialize(void) {
         linecount++;
     }
     wtfile.close();
+#endif
 
 #ifdef USE_OPENCL
     // input
@@ -616,7 +618,7 @@ Network::Netresult Network::get_scored_moves_internal(
     constexpr int height = 19;
 
     std::vector<float> softmax_data((width * height) + 1);
-#if !defined(USE_IPC) || defined(USE_IPC_TEST)
+#if !defined(USE_IPC) || defined(USE_IPC_SELFCHECK)
     const auto convolve_channels = conv_pol_w.size() / conv_pol_b.size();
     std::vector<net_t> output_data(convolve_channels * width * height);
     std::vector<float> policy_data(2 * width * height);
@@ -665,8 +667,8 @@ Network::Netresult Network::get_scored_moves_internal(
     winrate_sig = ipc_winrate_sig;
     metadata_mem[2] = 0;
 
-    #if defined(USE_IPC_TEST) && !defined(USE_OPENCL)
-        #error "Must turn on USE_OPENCL when using USE_IPC_TEST"
+    #if defined(USE_IPC_SELFCHECK) && !defined(USE_BLAS)
+        #error "Must turn on USE_BLAS when using USE_IPC_SELFCHECK"
     #endif
 #endif
 
@@ -685,6 +687,12 @@ Network::Netresult Network::get_scored_moves_internal(
         compare_net_outputs("OpenCL", output_data, cpu_output_data);
     }
 #endif
+
+#if !defined(USE_IPC) || defined(USE_IPC_SELFCHECK)
+    if (Random::get_Rng().randfix<SELFCHECK_PROBABILITY>() == 0) {
+#endif
+
+#if !defined(USE_IPC) || defined(USE_IPC_SELFCHECK)
     // We calculate both network heads on the CPU. They are irregular
     // and have a much lower compute densitity than the residual layers,
     // which means they don't get much - if any - speedup from being on the
@@ -707,15 +715,15 @@ Network::Netresult Network::get_scored_moves_internal(
 
     // BEGIN TESTING HERE
     #ifdef USE_IPC_SELFCHECK
-    if (Random::get_Rng().randfix<SELFCHECK_PROBABILITY>() == 0) {
         compare_net_outputs("IPC policy", ipc_policy_out, policy_out);
 
         std::vector<float> ipc_winrate(ipc_winrate_sig, 1);
         std::vector<float> winrate(winrate_sig, 1);
         compare_net_outputs("IPC winrate", ipc_winrate, winrate);
-    }
+        }
     #endif
     // END TESTING HERE
+#endif
 
     std::vector<float>& outputs = softmax_data;
     assert(outputs.size() == 362);

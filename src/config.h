@@ -71,11 +71,15 @@
 // #define USE_TUNER
 
 /* Features */
+/*
+ * USE_IPC: TODO add explination
+ */
 #define USE_IPC
 #define USE_IPC_SELFCHECK
 
-// TODO readd #errorwarning about USE_OPEN_CL if USE_IPC_TEST
-
+#if defined(USE_IPC_SELFCHECK) && !defined(USE_BLAS)
+    #error "Need USE_BLAS with USE_IPC_SELFCHECK"
+#endif
 
 #define PROGRAM_NAME "Leela Zero"
 #define PROGRAM_VERSION "0.10.1"
@@ -94,7 +98,7 @@
 using net_t = float;
 
 // TODO turn this into #error
-#if defined(USE_BLAS) && defined(USE_OPENCL) && !defined(USE_HALF)
+#if defined(USE_BLAS) && defined(USE_OPENCL) && !defined(USE_HALF) || defined(USE_IPC_SELFCHECK)
 // If both BLAS and OpenCL are fully usable, then check the OpenCL
 // results against BLAS with some probability.
 //#define USE_OPENCL_SELFCHECK
