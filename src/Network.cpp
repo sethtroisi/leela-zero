@@ -679,6 +679,10 @@ Network::Netresult Network::get_scored_moves_internal(
     #endif
 #endif
 
+#if !defined(USE_IPC) || defined(USE_IPC_SELFCHECK)
+    if (Random::get_Rng().randfix<SELFCHECK_PROBABILITY>() == 0) {
+#endif
+
 // TODO cleanup this a little
 #ifdef USE_OPENCL
     opencl_net.forward(input_data, output_data);
@@ -693,10 +697,6 @@ Network::Netresult Network::get_scored_moves_internal(
         forward_cpu(input_data, cpu_output_data);
         compare_net_outputs("OpenCL", output_data, cpu_output_data);
     }
-#endif
-
-#if !defined(USE_IPC) || defined(USE_IPC_SELFCHECK)
-    if (Random::get_Rng().randfix<SELFCHECK_PROBABILITY>() == 0) {
 #endif
 
 #if !defined(USE_IPC) || defined(USE_IPC_SELFCHECK)
