@@ -546,8 +546,15 @@ void compare_net_outputs(std::string error_location,
     for (auto idx = size_t{0}; idx < data.size(); ++idx) {
         auto err = relative_difference(data[idx], ref[idx]);
         if (err > relative_error) {
-            printf("Error in %s calculation, expected %f got %f (error=%f%%)\n",
-                   error_location.c_str(), ref[idx], data[idx], err * 100.0);
+            for (int i = 0; i < 19; i++) {
+                for (int j = 0; j < 19; j++) {
+                    printf("%6.3f ", ref[i * 19 + j]);
+                }
+                printf("\n");
+            }
+
+            printf("Error in %s calculation @ %ld, expected %f got %f (error=%f%%)\n",
+                   error_location.c_str(), idx, ref[idx], data[idx], err * 100.0);
             printf("Update your GPU drivers or reduce the amount of games "
                    "played simultaneously.\n");
             throw std::runtime_error("OpenCL self-check mismatch.");
