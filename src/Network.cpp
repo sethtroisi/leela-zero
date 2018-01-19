@@ -63,6 +63,7 @@
 #include "GameState.h"
 #include "GTP.h"
 #include "Im2Col.h"
+#include "IPC.h"
 #include "NNCache.h"
 #include "Random.h"
 #include "ThreadPool.h"
@@ -100,21 +101,12 @@ static std::array<float, 256> ip2_val_w;
 static std::array<float, 1> ip2_val_b;
 #endif
 
-using namespace boost::interprocess;
-shared_memory_object sh_mem;
-mapped_region region;
-int* int_mem;
-int* metadata_mem;
-float* input_mem;
-float* result_mem;
-std::unique_ptr<named_semaphore> input_ready_sem;
-std::unique_ptr<named_semaphore> output_ready_sem;
-
-
-int instance_id;
-
 // Rotation helper
 static std::array<std::array<int, 361>, 8> rotate_nn_idx_table;
+
+#ifdef USE_IPC
+static std::unique_ptr<IPC> ipc;
+#endif
 
 void Network::benchmark(const GameState * state, int iterations) {
     int cpus = cfg_num_threads;
@@ -146,59 +138,7 @@ void Network::process_bn_var(std::vector<float>& weights, const float epsilon) {
 
 void Network::initialize(void) {
 #ifdef USE_IPC
-    myprintf("Initializing shared memory and semaphores\n");
-
-    auto env_name = getenv("LEELAZ");
-    std::string pname(env_name == nullptr ? "lee" : env_name);
-    std::string shared_mem_name = "sm_" + pname;
-    sh_mem = shared_memory_object(open_only, shared_mem_name.c_str(), read_write);
-    region = mapped_region(sh_mem, read_write);
-
-    offset_t size;
-    sh_mem.get_size(size);
-    myprintf("Shared memory %d bytes\n", size);
-    { // get instance id
-        int_mem = static_cast<int*>(region.get_address());
-        std::string semaphore_name = pname + "_id_sem";
-        named_semaphore id_sem{open_only, semaphore_name.c_str()};
-        id_sem.wait();
-
-        auto num_instances = int_mem[0];
-        instance_id = int_mem[1];
-        int_mem[1]++;
-
-        id_sem.post();
-        myprintf("Client Id is %d / %d\n", instance_id, num_instances);
-        assert(0 <= instance_id && instance_id < num_instances);
-    }
-    { // setup input_mem / result_mem pointers
-        float* float_mem = static_cast<float*>(region.get_address());
-
-        // initial 10 (DEBUG_SIZE) entries
-        // each instance is 3 + INPUTS (18*19*19) + OUTPUTS (19*19+2)
-        int instance_size = 3 + 18*19*19 + 19*19+2;
-        float_mem += 10 + instance_id * instance_size;
-
-        metadata_mem = reinterpret_cast<int*>(float_mem);
-        // 3 metadata fields
-        float_mem += 3;
-        input_mem = float_mem;
-        float_mem += 18*19*19;
-        result_mem = float_mem;
-
-    }
-    { // setup io ready semaphores
-        auto input_ready_name = pname + "_input_ready";
-        input_ready_sem = std::make_unique<named_semaphore>(
-            open_only, input_ready_name.c_str());
-        auto output_ready_name =
-            pname + "_output_" + std::to_string(instance_id) + "_ready";
-        output_ready_sem = std::make_unique<named_semaphore>(
-            open_only, output_ready_name.c_str());
-
-    }
-    myprintf("IPC setup complete\n");
-    // TODO set hash in metadata_mem
+    ipc = std::make_unique<IPC>();
 #endif
 
     // Prepare rotation table
@@ -649,41 +589,23 @@ Network::Netresult Network::get_scored_moves_internal(
     float winrate_sig;
 
 #ifdef USE_IPC
-    std::memcpy(input_mem,
-                input_data.data(),
-                input_data.size() * sizeof(float));
-
-    // hash, input_ready, output_ready
-    assert(metadata_mem[1] == 0);
-    assert(metadata_mem[2] == 0);
-
-    // indicate input_data is set in shared_mem
-    metadata_mem[1] = 1;
-    input_ready_sem->post();
-
-    // Wait for results to be ready
-    output_ready_sem->wait();
-    assert(metadata_mem[1] == 0);
-    assert(metadata_mem[2] == 1);
-
-    std::vector<float> ipc_policy_out(result_mem, result_mem + 19*19+1);
+    std::vector<float> ipc_policy_out;
+    float temp_policy_out;
+    ipc->getResult(input_data, ipc_policy_out, temp_policy_out);
 
     softmax(ipc_policy_out, softmax_data, cfg_softmax_temp);
-
-    float ipc_winrate_sig = (1.0f + result_mem[19*19+1]) / 2.0f;
+    float ipc_winrate_sig = (1.0f + temp_policy_out) / 2.0f;
     winrate_sig = ipc_winrate_sig;
-    metadata_mem[2] = 0;
 
     #if defined(USE_IPC_SELFCHECK) && !defined(USE_BLAS)
         #error "Must turn on USE_BLAS when using USE_IPC_SELFCHECK"
     #endif
 #endif
 
-#if !defined(USE_IPC) || defined(USE_IPC_SELFCHECK)
+#ifdef USE_IPC_SELFCHECK
     if (Random::get_Rng().randfix<SELFCHECK_PROBABILITY>() == 0) {
 #endif
 
-// TODO cleanup this a little
 #ifdef USE_OPENCL
     opencl_net.forward(input_data, output_data);
 #elif defined(USE_BLAS) && !defined(USE_OPENCL)
@@ -699,7 +621,6 @@ Network::Netresult Network::get_scored_moves_internal(
     }
 #endif
 
-#if !defined(USE_IPC) || defined(USE_IPC_SELFCHECK)
     // We calculate both network heads on the CPU. They are irregular
     // and have a much lower compute densitity than the residual layers,
     // which means they don't get much - if any - speedup from being on the
@@ -730,7 +651,6 @@ Network::Netresult Network::get_scored_moves_internal(
         }
     #endif
     // END TESTING HERE
-#endif
 
     std::vector<float>& outputs = softmax_data;
     assert(outputs.size() == 362);
