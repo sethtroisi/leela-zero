@@ -25,9 +25,21 @@
 #include <boost/interprocess/sync/named_semaphore.hpp>
 #include <cassert>
 #include <cstdlib>
+#include <experimental/filesystem>
 #include <memory>
 
+#include "GTP.h"
 #include "Utils.h"
+
+
+std::string getFileName(const std::string& path) {
+    char sep = '/';
+    auto i = path.rfind(sep);
+    if (i != std::string::npos) {
+        return path.substr(i+1);
+    }
+    return path;
+}
 
 
 IPC::IPC(void) {
@@ -39,6 +51,16 @@ IPC::IPC(void) {
     std::string shared_mem_name = "sm_" + name;
     m_sh_mem = shared_memory_object(open_only, shared_mem_name.c_str(), read_write);
     m_region = mapped_region(m_sh_mem, read_write);
+
+    int hash_front, hash_back;
+    { // figure out hash_first, hash_last from cfg_weightsfile
+        //hash should be "<path>/<64HEX>"
+        std::string weights = getFileName(cfg_weightsfile);
+        assert(weights.size() == 64);
+        Utils::myprintf("what what \"%s\"", weights.c_str());
+        hash_front = std::stoi(weights.substr(0,7), 0, 16);
+        hash_back  = std::stoi(weights.substr(weights.size()-7,7), 0, 16);
+    }
 
     offset_t size;
     m_sh_mem.get_size(size);
@@ -55,8 +77,8 @@ IPC::IPC(void) {
 
         // initial 10 (DEBUG_SIZE) entries
         int_mem += 10;
-        // each instance is 4 + INPUTS (18*19*19) + OUTPUTS (19*19+2)
-        int instance_size = 4 + 18*19*19 + 19*19+2;
+        // each instance is metadata (5) + INPUTS (18*19*19) + OUTPUTS (19*19+2)
+        int instance_size = 5 + 18*19*19 + 19*19+2;
 
         m_instance_id = -1;
         for (int i = 0; i < num_instances; i++) {
@@ -66,12 +88,17 @@ IPC::IPC(void) {
                 // setup input_mem / result_mem pointers
                 m_instance_id = i;
                 m_metadata_mem = test_mem;
+
                 // mark slot in use
-                m_metadata_mem[3] = 1;
+                m_metadata_mem[2] = 1;
+
+                // set hash in metadata_mem
+                m_metadata_mem[3] = hash_front;
+                m_metadata_mem[4] = hash_back;
 
                 float* float_mem = reinterpret_cast<float*>(test_mem);
-                // 4 metadata fields
-                float_mem += 4;
+                // 5 metadata fields
+                float_mem += 5;
                 m_input_mem = float_mem;
                 float_mem += 18*19*19;
                 m_result_mem = float_mem;
@@ -79,7 +106,8 @@ IPC::IPC(void) {
                 break;
             }
         }
-        Utils::myprintf("Client Id is %d / %d\n", m_instance_id, num_instances);
+        Utils::myprintf("Client Id is %d / %d, hash %X...%X\n",
+            m_instance_id, num_instances, hash_front, hash_back);
         assert(0 <= m_instance_id && m_instance_id < num_instances);
 
         id_sem.post();
