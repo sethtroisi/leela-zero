@@ -15,6 +15,7 @@
     You should have received a copy of the GNU General Public License
     along with Leela Zero.  If not, see <http://www.gnu.org/licenses/>.
 */
+#include <iostream>
 
 #include "config.h"
 
@@ -285,11 +286,19 @@ UCTNode* UCTNode::uct_select_child(int color, bool is_root) {
         auto value = winrate + puct;
         assert(value > std::numeric_limits<double>::lowest());
 
+        //if (child.get_visits() > 1) {
+        //    int column = (child.get_move() % 21) - 1;
+        //    int row = (child.get_move() / 21) - 1;
+        //    std::cout << static_cast<char>('A' + column + (column > 8)) << (row+1)
+        //        << " " << value
+        //        << " " << std::endl;
+        //}
         if (value > best_value) {
             best_value = value;
             best = &child;
         }
     }
+    //std::cout << std::endl;
 
     assert(best != nullptr);
     best->inflate();

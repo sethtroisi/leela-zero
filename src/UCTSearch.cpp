@@ -15,6 +15,7 @@
     You should have received a copy of the GNU General Public License
     along with Leela Zero.  If not, see <http://www.gnu.org/licenses/>.
 */
+#include <iostream>
 
 #include "config.h"
 #include "UCTSearch.h"
@@ -247,6 +248,7 @@ void UCTSearch::dump_stats(FastState & state, UCTNode & parent) {
     }
 
     int movecount = 0;
+    auto numerator = std::sqrt(double(std::max(1, parent.get_visits() - 1)));
     for (const auto& node : parent.get_children()) {
         // Always display at least two moves. In the case there is
         // only one move searched the user could get an idea why.
@@ -257,10 +259,27 @@ void UCTSearch::dump_stats(FastState & state, UCTNode & parent) {
         tmpstate.play_move(node->get_move());
         std::string pv = move + " " + get_pv(tmpstate, *node);
 
-        myprintf("%4s -> %7d (V: %5.2f%%) (N: %5.2f%%) PV: %s\n",
+        auto winrate = node->get_net_eval(color);
+        if (node->get_visits() > 0) {
+            winrate = node->get_eval(color);
+        }
+        auto psa = node->get_policy();
+        auto denom = 1.0 + node->get_visits();
+        auto puct = cfg_puct * psa * (numerator / denom);
+        auto value = (2*winrate-1) + 2*puct;
+
+
+        myprintf(
+//            "%4s -> %7d (V: %5.2f%% | MG(AQUP):) (N: %5.2f%%) PV: %s\n",
+            "%4s -> %7d (V: %5.2f%% %1.5f MG(AQUP): %2.4f, %2.4f, %1.4f, %1.4f) (N: %5.2f%%) PV: %s\n",
             move.c_str(),
             node->get_visits(),
-            node->get_visits() ? node->get_raw_eval(color)*100.0f : 0.0f,
+            node->get_visits() ? node->get_eval(color)*100.0f : 0.0f,
+                winrate + puct,
+                value,
+                2 * winrate - 1,
+                2 * puct,
+                psa,
             node->get_policy() * 100.0f,
             pv.c_str());
     }
@@ -696,6 +715,7 @@ int UCTSearch::think(int color, passflag_t passflag) {
     auto last_update = 0;
     auto last_output = 0;
     do {
+        dump_stats(m_rootstate, *m_root);
         auto currstate = std::make_unique<GameState>(m_rootstate);
 
         auto result = play_simulation(*currstate, m_root.get());

@@ -80,7 +80,7 @@ static constexpr auto BOARD_SQUARES = BOARD_SIZE * BOARD_SIZE;
  * accuracy on the calculation, but generally it is worth using half precision
  * if it is at least 5% faster.
  */
-#define USE_HALF
+//#define USE_HALF
 
 #endif
 
@@ -93,7 +93,7 @@ static_assert(MAX_BATCH == 1, "MAX_BATCH != 1 not implemented");
  * USE_TUNER: Expose some extra command line parameters that allow tuning the
  * search algorithm.
  */
-//#define USE_TUNER
+#define USE_TUNER
 
 static constexpr auto PROGRAM_NAME = "Leela Zero";
 static constexpr auto PROGRAM_VERSION = "0.15";

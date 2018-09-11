@@ -59,6 +59,8 @@
 #include "Timing.h"
 #include "Utils.h"
 
+#include <iostream>
+
 namespace x3 = boost::spirit::x3;
 using namespace Utils;
 
@@ -639,6 +641,7 @@ std::vector<float> softmax(const std::vector<float>& input,
 
 bool Network::probe_cache(const GameState* const state,
                           Network::Netresult& result) {
+    return false;
     if (m_nncache.lookup(state->board.get_hash(), result)) {
         return true;
     }
@@ -668,6 +671,7 @@ bool Network::probe_cache(const GameState* const state,
     return false;
 }
 
+int aoeu = 3;
 Network::Netresult Network::get_output(
     const GameState* const state, const Ensemble ensemble,
     const int symmetry, const bool skip_cache) {
@@ -699,7 +703,7 @@ Network::Netresult Network::get_output(
     } else {
         assert(ensemble == RANDOM_SYMMETRY);
         assert(symmetry == -1);
-        const auto rand_sym = Random::get_Rng().randfix<NUM_SYMMETRIES>();
+        const auto rand_sym = (aoeu++) % 8; //Random::get_Rng().randfix<NUM_SYMMETRIES>();
         result = get_output_internal(state, rand_sym);
 #ifdef USE_OPENCL_SELFCHECK
         // Both implementations are available, self-check the OpenCL driver by
@@ -719,9 +723,32 @@ Network::Netresult Network::get_output(
             result.winrate = 1.0f - result.winrate;
         }
     }
+ /*
+    std::cout << "Moves:";
+    for (auto past_state : state->game_history) {
+        int last_move = past_state->get_last_move();
+        if (last_move == 0) { continue; } // root state
+        std::cout << " " << past_state->board.move_to_text(last_move);
+    }
+    std::cout << std::endl;
+// */
+ /*
+    std::cout << "run " << result.winrate << "\t" << result.winrate * 2 - 1 << std::endl;
+    float sum = 0;
+    for (int y = 18; y >= 0; y--) {
+        for (int x = 0; x < 19; x++) {
+            int idx = 19 * y + x;
+            myprintf("%4.0f ", 10000.0 * result.policy[idx]);
+            sum += result.policy[idx];
+        }
+        myprintf("\n");
+    }
+    sum += result.policy[19*19]; // Pass
 
+    printf("\nsum: %.6f\n\n", sum);
+// */
     // Insert result into cache.
-    m_nncache.insert(state->board.get_hash(), result);
+    //m_nncache.insert(state->board.get_hash(), result);
 
     return result;
 }
@@ -786,13 +813,13 @@ void Network::show_heatmap(const FastState* const state,
 
     for (unsigned int y = 0; y < BOARD_SIZE; y++) {
         for (unsigned int x = 0; x < BOARD_SIZE; x++) {
-            auto policy = 0;
+            auto policy = 0.0f;
             const auto vertex = state->board.get_vertex(x, y);
             if (state->board.get_square(vertex) == FastBoard::EMPTY) {
-                policy = result.policy[y * BOARD_SIZE + x] * 1000;
+                policy = result.policy[y * BOARD_SIZE + x] * 100000;
             }
 
-            line += boost::str(boost::format("%3d ") % policy);
+            line += boost::str(boost::format("%5.0f ") % policy);
         }
 
         display_map.push_back(line);
@@ -805,6 +832,7 @@ void Network::show_heatmap(const FastState* const state,
     const auto pass_policy = int(result.policy_pass * 1000);
     myprintf("pass: %d\n", pass_policy);
     myprintf("winrate: %f\n", result.winrate);
+    myprintf("winrate: %.4f    | MG: %.4f\n", result.winrate, result.winrate * 2 - 1);
 
     if (topmoves) {
         std::vector<Network::PolicyVertexPair> moves;
