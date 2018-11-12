@@ -197,6 +197,7 @@ const std::string GTP::s_commands[] = {
     "lz-genmove_analyze",
     "lz-memory_report",
     "lz-setoption",
+    "gomill-describe_engine",
     ""
 };
 
@@ -299,8 +300,13 @@ bool GTP::execute(GameState & game, const std::string& xinput) {
         gtp_printf(id, PROGRAM_NAME);
         return true;
     } else if (command == "version") {
-        gtp_printf(id, PROGRAM_VERSION);
+        gtp_printf(id, cfg_weightsfile.c_str());
+        //gtp_printf(id, PROGRAM_VERSION);
         return true;
+    } else if (command.find("gomill-describe_engine") == 0) {
+        gtp_printf(id, "%s_%s", PROGRAM_NAME, cfg_weightsfile.c_str());
+        return true;
+
     } else if (command == "quit") {
         gtp_printf(id, "");
         exit(EXIT_SUCCESS);
